@@ -1,0 +1,112 @@
+# core/chat_logic.py
+import os
+import sys
+import uuid
+import re
+import pandas as pd
+import pypdf
+from dotenv import load_dotenv
+from openai import OpenAI
+from db.connection import connect_db  # ✅ Nueva importación
+
+# ===============================
+# CONFIGURACIÓN
+# ===============================
+load_dotenv()
+
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+if not DEEPSEEK_API_KEY or not OPENAI_API_KEY:
+    print("❌ Falta API Key en .env")
+    sys.exit(1)
+
+OPENAI_CLIENT = OpenAI(api_key=OPENAI_API_KEY)
+DEEPSEEK_CLIENT = OpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com/v1")
+
+# --- (El resto de tu código se deja idéntico) ---
+# ===============================
+# CHAT & SESIONES
+# ===============================
+def save_message(session_id, role, msg):
+    conn = connect_db()
+    if not conn:
+        return
+    try:
+        with conn.cursor() as cur:
+            db_role = "bot" if role == "assistant" else role
+            cur.execute("INSERT INTO chatbot_logs (session_id, role, message) VALUES (%s,%s,%s)", (session_id, db_role, msg))
+            conn.commit()
+    finally:
+        conn.close()
+
+
+def get_history(session_id):
+    conn = connect_db()
+    if not conn:
+        return []
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT role, message FROM chatbot_logs WHERE session_id=%s ORDER BY timestamp", (session_id,))
+            return [{"role": "assistant" if r[0]=="bot" else r[0], "content": r[1]} for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def list_sessions():
+    conn = connect_db()
+    if not conn:
+        return []
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT session_id, COUNT(*) FROM chatbot_logs GROUP BY session_id ORDER BY MAX(timestamp) DESC")
+            return cur.fetchall()
+    finally:
+        conn.close()
+
+
+def select_or_create_session():
+    sessions = list_sessions()
+    if sessions:
+        print("\n📂 Sesiones previas:")
+        for i, (sid, count) in enumerate(sessions):
+            print(f"{i+1}. {sid} ({count} mensajes)")
+        print(f"{len(sessions)+1}. Nueva sesión")
+        ch = input("Elige: ")
+        if ch.isdigit() and 1 <= int(ch) <= len(sessions):
+            return sessions[int(ch)-1][0]
+    return str(uuid.uuid4())
+
+
+# ===============================
+# MODELO DE CHAT
+# ===============================
+def deepseek_chat(question, context=None, history=None):
+    system_prompt = (
+        "Eres un asistente inteligente y amable. "
+        "Puedes mantener una conversación general o analizar documentos PDF/CSV cargados. "
+        "Si hay contexto, úsalo para responder basándote en el documento. "
+        "Si no, responde de forma natural como un chatbot general. "
+        "Sé claro, conciso y no inventes información."
+    )
+
+    user_prompt = f"Pregunta: {question}"
+    if context:
+        user_prompt += f"\n\nContexto del documento:\n{context}"
+
+    messages = [{"role": "system", "content": system_prompt}]
+    if history:
+        messages += history[-6:]
+    messages.append({"role": "user", "content": user_prompt})
+
+    try:
+        res = DEEPSEEK_CLIENT.chat.completions.create(
+            model="deepseek-chat",
+            messages=messages,
+            max_tokens=800,
+            temperature=0.7
+        )
+        return res.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"❌ Error DeepSeek: {e}")
+        return "No pude generar respuesta ahora."
