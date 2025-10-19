@@ -7,7 +7,17 @@ import pandas as pd
 import pypdf
 from dotenv import load_dotenv
 from openai import OpenAI
-from db.connection import connect_db  # ✅ Nueva importación
+from db.connection import connect_db 
+
+# Importar módulos del núcleo de IA
+from core.ai_core.nlp_embeddings import extract_entities
+from core.ai_core.intention_analyzer import detect_intention
+from core.ai_core.nlp_embeddings import analyze_text
+from core.ai_core.intention_analyzer import detect_intention
+from core.ai_core.dynamic_planner import plan_actions
+from core.ai_core.nlp_embeddings import analyze_text
+from core.ai_core.query_generator import generate_query_from_plan
+from core.ai_core.report_synthesizer import generate_report
 
 # ===============================
 # CONFIGURACIÓN
@@ -88,11 +98,49 @@ def deepseek_chat(question, context=None, history=None):
         "Si hay contexto, úsalo para responder basándote en el documento. "
         "Si no, responde de forma natural como un chatbot general. "
         "Sé claro, conciso y no inventes información."
+        "Eres un agente inteligente con memoria y capacidad de análisis contextual. "
+        "Puedes mantener conversaciones generales, generar informes automáticos, "
+        "consultar datos o analizar información compleja. "
+        "Si el usuario hace una petición técnica o analítica, responde de forma estructurada."
     )
+    # === 1️⃣ Análisis de intención ===
+    intent_data = detect_intention(question)
+    tipo = intent_data.get("tipo")
 
+    # Si el usuario pide una acción (no simple chat)
+    if tipo in ["evaluar", "generar_informe", "consultar_datos", "guardar_resultado"]:
+        print(f"🧠 Activando modo AIGR (intención: {tipo})")
+
+        # === 2️⃣ Planificación dinámica ===
+        plan = plan_actions(intent_data)
+
+        # === 3️⃣ Generar SQL con base en el plan ===
+        sql_result = generate_query_from_plan(plan)
+        sql = sql_result.get("sql")
+
+        if not sql:
+            return "No pude generar una consulta válida basada en tu solicitud."
+
+        print(f"📜 SQL generado:\n{sql}")
+
+        # === 4️⃣ Ejecutar SQL ===
+        conn = connect_db()
+        try:
+            df = pd.read_sql(sql, conn)
+        except Exception as e:
+            print(f"❌ Error ejecutando SQL: {e}")
+            df = pd.DataFrame()
+        finally:
+            conn.close()
+
+        # === 5️⃣ Generar informe cognitivo ===
+        report = generate_report(df, question)
+        return f"🧩 Consulta realizada con éxito.\n\n{report}"
+
+    # === 6️⃣ Si no hay intención cognitiva → modo conversación normal ===
     user_prompt = f"Pregunta: {question}"
     if context:
-        user_prompt += f"\n\nContexto del documento:\n{context}"
+        user_prompt += f"\n\nContexto:\n{context}"
 
     messages = [{"role": "system", "content": system_prompt}]
     if history:
