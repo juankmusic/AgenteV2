@@ -1,28 +1,26 @@
-# core/ai_core/query_generator.py
-
 import os
+import re
 import json
-import psycopg2
 from dotenv import load_dotenv
 from openai import OpenAI as OpenAIClient
-from core.ai_core.dynamic_planner import plan_actions
 from db.connection import connect_db
 
 # ======================================================
-# CONFIGURACIÓN
+# CONFIGURACIÓN INICIAL
 # ======================================================
 load_dotenv()
 
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-deepseek_client = OpenAIClient(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com/v1")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+openai_client = OpenAIClient(api_key=OPENAI_API_KEY)
 
 # ======================================================
 # 1️⃣ FUNCIÓN: OBTENER ESTRUCTURA DE LA BASE DE DATOS
 # ======================================================
 def get_database_schema():
     """
-    Recupera las tablas y columnas de la base de datos.
-    Devuelve un diccionario con la estructura.
+    Recupera todas las tablas y columnas del esquema 'public' en PostgreSQL.
+    Excluye vistas y tablas del sistema (pg_*, sql_*).
+    Devuelve un diccionario estructurado {tabla: [{columna, tipo}, ...]}.
     """
     schema = {}
     conn = connect_db()
@@ -36,127 +34,130 @@ def get_database_schema():
                 SELECT table_name, column_name, data_type
                 FROM information_schema.columns
                 WHERE table_schema = 'public'
+                AND table_name NOT LIKE 'pg_%'
+                AND table_name NOT LIKE 'sql_%'
                 ORDER BY table_name, ordinal_position;
             """)
             rows = cur.fetchall()
+
             for table, col, dtype in rows:
-                schema.setdefault(table, []).append({"columna": col, "tipo": dtype})
+                schema.setdefault(table, []).append({
+                    "columna": col,
+                    "tipo": dtype
+                })
+
+        print(f"📚 Esquema detectado: {len(schema)} tablas encontradas.")
         return schema
+
+    except Exception as e:
+        print(f"❌ Error obteniendo esquema: {e}")
+        return {}
     finally:
         conn.close()
 
 # ======================================================
-# 2️⃣ FUNCIÓN: VALIDAR CONSULTA SQL
+# 2️⃣ FUNCIÓN: VALIDAR CONSULTAS SQL
 # ======================================================
 def validate_sql(sql: str) -> bool:
     """
-    Rechaza SQL peligrosos (DROP, DELETE sin WHERE, etc.)
+    Analiza la consulta SQL generada y bloquea comandos destructivos o no seguros.
+    Rechaza DROP, TRUNCATE, ALTER, DELETE o UPDATE sin cláusula WHERE.
     """
-    sql_upper = sql.upper()
-    forbidden = ["DROP", "TRUNCATE", "ALTER", "DELETE FROM", "UPDATE"]
-    if any(cmd in sql_upper for cmd in forbidden):
-        print("⚠️ SQL potencialmente peligroso detectado.")
+    forbidden = r"\b(DROP|TRUNCATE|ALTER|DELETE(?!.*WHERE)|UPDATE(?!.*WHERE))\b"
+    if re.search(forbidden, sql, re.IGNORECASE):
+        print("⚠️ SQL potencialmente peligroso detectado y rechazado.")
         return False
     return True
 
 # ======================================================
-# 3️⃣ FUNCIÓN PRINCIPAL: GENERAR CONSULTA CON DEEPSEEK
+# 3️⃣ FUNCIÓN PRINCIPAL: GENERAR CONSULTA SQL
 # ======================================================
-def generate_sql_with_deepseek(plan: dict, schema: dict) -> dict:
+def generate_sql_with_openai(plan: dict, schema: dict) -> dict:
     """
-    Usa el modelo de lenguaje para generar una consulta SQL válida
-    según la estructura de la base de datos y el plan del agente.
+    Usa un modelo de lenguaje para generar una consulta SQL válida y segura
+    basada en el plan de acción del agente y el esquema real de la base.
     """
     plan_json = json.dumps(plan, ensure_ascii=False, indent=2)
     schema_json = json.dumps(schema, ensure_ascii=False, indent=2)
 
     prompt = f"""
-    Eres un generador experto de consultas SQL para PostgreSQL.
-    Tu tarea es crear una consulta SQL **válida y segura**
-    basada en el siguiente plan de acción y la estructura de base de datos.
+    Eres un generador experto de SQL para PostgreSQL 15 (compatible con pgvector).
+    Tienes acceso a una base de datos con las siguientes tablas y columnas:
 
-    ⚙️ Plan del agente:
-    {plan_json}
-
-    🧩 Estructura de la base de datos:
     {schema_json}
 
-    Reglas:
-    - No modifiques la estructura de la base de datos.
-    - No uses comandos DROP, TRUNCATE, ALTER o DELETE sin WHERE.
-    - Si el plan es de tipo 'evaluar_colaborador' o 'guardar_datos', genera un INSERT.
-    - Si es de tipo 'consultar_datos' o 'generar_reporte', genera un SELECT.
-    - Devuelve SOLO un JSON válido con el siguiente formato:
+    Tu tarea es generar una consulta SQL válida y segura
+    basada en el siguiente plan de acción del agente inteligente:
 
+    {plan_json}
+
+    Reglas:
+    - No uses DROP, ALTER ni TRUNCATE.
+    - Usa SELECT, INSERT o UPDATE según corresponda.
+    - Si el plan es de tipo 'evaluar' o 'guardar_resultado', genera un INSERT.
+    - Si es de tipo 'consultar_datos' o 'generar_informe', genera un SELECT.
+    - Si el plan menciona embeddings, analiza o busca similitud, usa la tabla 'document_embeddings' con su columna 'embedding'.
+    - Devuelve SOLO un JSON válido con este formato exacto:
     {{
-        "sql": "<consulta generada>",
-        "descripcion": "<explicación natural de lo que hará la consulta>"
+        "sql": "SELECT ...",
+        "descripcion": "Explicación natural de lo que hará la consulta"
     }}
     """
 
     try:
-        res = deepseek_client.chat.completions.create(
-            model="deepseek-chat",
+        res = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Eres un generador SQL experto. Devuelve siempre JSON válido."},
+                {"role": "system", "content": "Eres un generador SQL experto en PostgreSQL y pgvector. Devuelve solo JSON válido."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.4
+            temperature=0.2
         )
 
         raw_output = res.choices[0].message.content.strip()
-
         clean_output = (
             raw_output.replace("```json", "")
                       .replace("```", "")
-                      .replace("\\n", "")
-                      .replace("\n", "")
                       .strip()
         )
 
+        # Intentar parsear el JSON
         result = json.loads(clean_output)
         sql = result.get("sql", "").strip()
 
+        # Validación de seguridad
         if not validate_sql(sql):
-            return {
-                "sql": None,
-                "descripcion": "Consulta rechazada por motivos de seguridad."
-            }
+            return {"sql": None, "descripcion": "Consulta rechazada por motivos de seguridad."}
 
+        print(f"✅ SQL generado:\n{sql}")
         return result
 
+    except json.JSONDecodeError:
+        print(f"❌ Error: la respuesta del modelo no es JSON válido.\nSalida cruda:\n{raw_output}")
+        return {"sql": None, "descripcion": "Respuesta no JSON del modelo."}
     except Exception as e:
         print(f"❌ Error generando SQL: {e}")
         return {"sql": None, "descripcion": str(e)}
 
 # ======================================================
-# 4️⃣ FUNCIÓN: INTERFAZ PRINCIPAL
+# 4️⃣ FUNCIÓN: INTERFAZ PÚBLICA
 # ======================================================
 def generate_query_from_plan(plan: dict) -> dict:
     """
-    Combina lectura del esquema + generación SQL automática.
+    Punto de entrada principal.
+    Lee la estructura de la base de datos y genera una consulta SQL
+    a partir del plan de acción del agente inteligente.
     """
     schema = get_database_schema()
     if not schema:
-        return {"sql": None, "descripcion": "No se pudo obtener el esquema de la base de datos."}
+        print("⚠️ No se pudo obtener el esquema de la base de datos.")
+        return {"sql": None, "descripcion": "Error al obtener el esquema."}
 
-    result = generate_sql_with_deepseek(plan, schema)
+    result = generate_sql_with_openai(plan, schema)
+
+    if result.get("sql"):
+        print(f"📜 Consulta generada exitosamente.")
+    else:
+        print(f"⚠️ No se pudo generar la consulta SQL.")
+
     return result
-
-# ======================================================
-# 5️⃣ PRUEBA LOCAL
-# ======================================================
-if __name__ == "__main__":
-    # Plan simulado desde el Dynamic Planner
-    example_plan = {
-        "accion": "evaluar_colaborador",
-        "parametros": {
-            "colaborador": "María",
-            "virtudes": ["colaborativa", "resiliente"],
-            "areas_mejora": ["liderazgo"]
-        }
-    }
-
-    sql_result = generate_query_from_plan(example_plan)
-    print("\n🧠 SQL generado por el agente:")
-    print(json.dumps(sql_result, indent=2, ensure_ascii=False))

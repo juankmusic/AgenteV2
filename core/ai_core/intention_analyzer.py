@@ -43,7 +43,7 @@ BASE_EMBEDDINGS = {
 # ==============================================
 def cosine_similarity(vec1, vec2):
     if not vec1 or not vec2:
-        return 0
+        return 0.0
     v1, v2 = np.array(vec1), np.array(vec2)
     return float(np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2)))
 
@@ -76,8 +76,8 @@ def classify_intention_deepseek(text):
     """
 
     try:
-        res = deepseek_client.chat.completions.create(
-            model="deepseek-chat",
+        res = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "Eres un analista semántico experto en clasificación de intenciones. Devuelve solo JSON válido."},
                 {"role": "user", "content": prompt}
@@ -131,30 +131,18 @@ def detect_intention(text: str) -> dict:
         else best_match
     )
 
-    # 5️⃣ Extraer entidades semánticas (usando nlp_embeddings)
+    # 5️⃣ Calcular confianza ponderada (DeepSeek + similitud semántica)
+    final_confidence = (
+        0.6 * deepseek_result.get("confianza", 0.0)
+        + 0.4 * best_score
+    )
+
+    # 6️⃣ Extraer entidades semánticas (usando nlp_embeddings)
     entidades = extract_entities(text)
 
     return {
         "tipo": final_tipo,
         "subtipo": deepseek_result.get("subtipo"),
-        "confianza": max(best_score, deepseek_result.get("confianza", 0)),
+        "confianza": round(final_confidence, 3),
         "entidades": entidades,
     }
-
-
-# ==============================================
-# 5️⃣ PRUEBA LOCAL
-# ==============================================
-if __name__ == "__main__":
-    ejemplos = [
-        "Quiero evaluar a María, ha sido muy colaborativa pero le falta liderazgo.",
-        "Genera un informe del equipo de ventas.",
-        "Muéstrame cómo fue el desempeño del trimestre pasado.",
-        "Guarda los resultados de la evaluación de Laura.",
-        "Hola, ¿cómo estás?"
-    ]
-
-    for e in ejemplos:
-        print(f"\n🧩 Texto: {e}")
-        result = detect_intention(e)
-        print(json.dumps(result, indent=2, ensure_ascii=False))

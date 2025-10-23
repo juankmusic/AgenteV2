@@ -3,6 +3,8 @@ import os
 import json
 import pandas as pd
 import matplotlib.pyplot as plt
+import io
+import base64
 from dotenv import load_dotenv
 from openai import OpenAI as OpenAIClient
 
@@ -10,9 +12,11 @@ from openai import OpenAI as OpenAIClient
 # CONFIGURACIÓN
 # ===========================
 load_dotenv()
-DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-deepseek_client = OpenAIClient(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com/v1")
+#DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
+#deepseek_client = OpenAIClient(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com/v1")
 
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+openai_client = OpenAIClient(api_key=OPENAI_API_KEY)
 # ===========================
 # SÍNTESIS DE RESULTADOS
 # ===========================
@@ -45,8 +49,8 @@ def synthesize_from_results(results: pd.DataFrame, user_input: str) -> str:
 
 
     try:
-        response = deepseek_client.chat.completions.create(
-            model="deepseek-chat",
+        response = openai_client.chat.completions.create(
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "Eres un analista cognitivo experto. Redacta informes claros y naturales en español."},
                 {"role": "user", "content": prompt}
@@ -61,32 +65,49 @@ def synthesize_from_results(results: pd.DataFrame, user_input: str) -> str:
 # 2️⃣ OPCIONAL: VISUALIZACIÓN
 # ===========================
 def generate_visualization(results: pd.DataFrame, user_input: str) -> str:
-    """
-    Genera una visualización adaptativa si el usuario lo pide.
-    """
+    import io, base64, matplotlib.pyplot as plt
+
     try:
-        if any(word in user_input.lower() for word in ["gráfico", "grafico", "visualiza", "diagrama"]):
-            counts = results.select_dtypes(include=["object"]).apply(lambda x: x.value_counts().head(5))
-            counts.plot(kind="barh", figsize=(8, 5), title="Resumen visual automático")
-            os.makedirs("static/reports", exist_ok=True)
-            path = f"static/reports/visual_{hash(user_input)}.png"
-            plt.tight_layout()
-            plt.savefig(path)
-            plt.close()
-            return f"📊 Se generó un gráfico: {path}"
-        return ""
+        if not any(w in user_input.lower() for w in ["gráfico", "grafico", "visualiza", "diagrama", "plot", "ver"]):
+            return ""
+
+        numeric_cols = results.select_dtypes(include=["number"]).columns
+        categorical_cols = results.select_dtypes(include=["object", "category"]).columns
+
+        plt.figure(figsize=(8, 5))
+
+        if len(numeric_cols) >= 2:
+            results[numeric_cols].corr().plot(kind="heatmap", cmap="coolwarm")
+            plt.title("Mapa de correlación")
+        elif len(numeric_cols) == 1:
+            col = numeric_cols[0]
+            results[col].plot(kind="hist", bins=10, alpha=0.7)
+            plt.title(f"Distribución de {col}")
+        elif len(categorical_cols) >= 1:
+            col = categorical_cols[0]
+            results[col].value_counts().head(10).plot(kind="barh", color="skyblue")
+            plt.title(f"Frecuencia de {col}")
+        else:
+            plt.text(0.5, 0.5, "No hay datos visualizables", ha="center")
+
+        plt.tight_layout()
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png")
+        buf.seek(0)
+        img_base64 = base64.b64encode(buf.read()).decode("utf-8")
+        plt.close()
+
+        return f'<div style="text-align:center;margin-top:10px;"><img src="data:image/png;base64,{img_base64}" alt="Gráfico generado" style="max-width:100%;border-radius:12px;box-shadow:0 0 8px rgba(0,0,0,0.3)"></div>'
     except Exception as e:
-        return f"⚠️ No se pudo generar el gráfico: {e}"
+        return f"<p style='color:#f87171;'>⚠️ No se pudo generar el gráfico: {e}</p>"
 
 # ===========================
 # 3️⃣ INTERFAZ PRINCIPAL
 # ===========================
 def generate_report(results: pd.DataFrame, user_input: str) -> str:
-    """
-    Genera el informe final combinando análisis semántico + visualización opcional.
-    """
     report_text = synthesize_from_results(results, user_input)
-    visual_info = generate_visualization(results, user_input)
-    return f"{report_text}\n\n{visual_info}"
+    visual_html = generate_visualization(results, user_input)
+    return f"<div>{report_text}</div>{visual_html}"
+
 
 # ===============================

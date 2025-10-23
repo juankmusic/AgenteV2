@@ -328,7 +328,7 @@ function appendMessage(msg, cls) {
 
     const div = document.createElement("div");
     div.className = "message " + cls;
-    div.innerText = msg;
+    div.innerHTML = msg;
 
     wrapper.appendChild(div);
     messagesDiv.appendChild(wrapper);
