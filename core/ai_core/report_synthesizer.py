@@ -5,8 +5,11 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import io
 import base64
+from datetime import datetime
 from dotenv import load_dotenv
 from openai import OpenAI as OpenAIClient
+import matplotlib.pyplot as plt
+from markdown import markdown 
 
 # ===========================
 # CONFIGURACIÓN
@@ -17,59 +20,164 @@ load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai_client = OpenAIClient(api_key=OPENAI_API_KEY)
+
+# Columnas sensibles que deben enmascararse si aparecen
+SENSITIVE_COLS = {"correo", "contrasena", "password", "email", "telefono", "tel"}
+
+# Palabras que indican que el usuario quiere una tabla o un gráfico
+TABLE_KEYWORDS = ["tabla", "muéstrame una tabla", "muestrame una tabla", "mostrar tabla", "mostrar una tabla", "tabla con"]
+GRAPH_KEYWORDS = ["gráfico", "grafico", "visualiza", "muestra un gráfico", "plot", "grafique", "visualizar"]
+
 # ===========================
-# SÍNTESIS DE RESULTADOS
+# UTILIDADES
+# ===========================
+def _user_wants_table(user_input: str) -> bool:
+    txt = user_input.lower()
+    return any(k in txt for k in TABLE_KEYWORDS)
+
+def _user_wants_graph(user_input: str) -> bool:
+    txt = user_input.lower()
+    return any(k in txt for k in GRAPH_KEYWORDS)
+
+def _mask_sensitive_columns(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    for col in df.columns:
+        if col.lower() in SENSITIVE_COLS:
+            df[col] = df[col].apply(lambda v: "****@oculto" if pd.notna(v) else v)
+    return df
+
+def _limit_and_stringify(df: pd.DataFrame, max_rows: int = 5) -> pd.DataFrame:
+    sample = df.head(max_rows).copy()
+    # Convertir a strings para evitar problemas de serialización
+    for c in sample.columns:
+        sample[c] = sample[c].astype(str)
+    return sample
+
+# ===========================
+# 1️⃣ SÍNTESIS DE RESULTADOS (solo texto)
 # ===========================
 def synthesize_from_results(results: pd.DataFrame, user_input: str) -> str:
     """
-    Toma resultados (ya consultados) y genera una interpretación natural y contextual.
+    Analiza los resultados de la consulta y genera un informe narrativo y seguro.
+    No muestra tablas ni datos sensibles.
     """
-    if results.empty:
-        return "No se encontraron datos relevantes para tu solicitud."
 
-    # 🔹 Conversión segura para serialización JSON
-    safe_results = results.copy()
-    for col in safe_results.columns:
-        safe_results[col] = safe_results[col].astype(str)
+    # Limitar muestra para enviar al LLM
+    sample = _limit_and_stringify(results, max_rows=5)
+    data_sample = sample.to_dict(orient="records")
+    today = datetime.now().strftime("%d/%m/%Y %H:%M")
 
-    data_sample = safe_results.head(10).to_dict(orient="records")
-
+    # Construir prompt controlado
     prompt = f"""
-    Eres un agente inteligente que debe analizar resultados obtenidos desde una base de datos.
-    El usuario solicitó: "{user_input}"
+    Eres un analista cognitivo que genera informes concisos y confidenciales.
+    Tu tarea es describir los datos sin agregar ejemplos ni suposiciones.
+    Si un valor no tiene un significado textual (como IDs numéricos), no lo interpretes ni inventes.
+    El usuario pidió: "{user_input}"
 
-    Estos son los datos relevantes:
+    Solo tienes una muestra limitada de los datos (para contexto), no muestres tablas ni datos sensibles:
     {json.dumps(data_sample, ensure_ascii=False, indent=2)}
 
-    Tu tarea es:
-    1. Comprender qué representan los datos en el contexto del usuario.
-    2. Generar un informe claro, natural y analítico.
-    3. Si el usuario pidió un gráfico, sugiere cuál sería el tipo adecuado.
+    Instrucciones:
+    - Redacta un informe ejecutivo y analítico en español.
+    - No incluyas tablas ni listados de datos.
+    - No muestres ni reconstruyas información sensible (correos, contraseñas, etc.).
+    - No sugieras gráficos si el usuario no los pidió explícitamente.
+    - Evita firmas o placeholders como [Su Nombre] o [Fecha Actual]; incluye la fecha real.
     """
-
-
     try:
         response = openai_client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Eres un analista cognitivo experto. Redacta informes claros y naturales en español."},
+                {"role": "system", "content": "Eres un generador de informes profesional. Responde en español con tono analítico y claro."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.5
+            temperature=0.4
         )
-        return response.choices[0].message.content.strip()
+        analysis = response.choices[0].message.content.strip()
+        header = f"### Informe Analítico Automatizado\n**Fecha de generación:** {today}\n\n"
+        return header + analysis
     except Exception as e:
-        return f"Error generando informe: {e}"
+        return f"<p style='color:#f87171;'>❌ Error generando informe: {e}</p>"
+
+def generate_table_html(results: pd.DataFrame, user_input: str) -> str:
+    """
+    Genera una tabla HTML solo si el usuario la solicita. 
+    Enmascara columnas sensibles y limita el número de filas/columnas.
+    """
+    if not _user_wants_table(user_input):
+        return ""
+
+    if results is None or results.empty:
+        return "<p>⚠️ No hay datos para mostrar en tabla.</p>"
+
+    # Enmascarar columnas sensibles
+    df = _mask_sensitive_columns(results)
+
+    # Limitar columnas: elegimos hasta 8 columnas (priorizamos no mostrar demasiadas)
+    max_cols = 8
+    cols = list(df.columns)[:max_cols]
+    df_small = df[cols].head(10).copy()  # máximo 10 filas visibles
+
+    # Mejorar visualización: transformar NA en vacío
+    df_small = df_small.fillna("")
+
+    # Generar CSS simple para tabla
+    style = """
+    <style>
+    .aigr-table {
+    border-collapse: collapse;
+    width: 100%;
+    font-family: 'Segoe UI', sans-serif;
+    margin-top: 12px;
+    color: #e2e8f0; /* texto claro */
+    }
+    .aigr-table th {
+    background: #1e293b;
+    color: #f8fafc;
+    padding: 10px;
+    text-align: left;
+    font-weight: 600;
+    border-bottom: 2px solid #334155;
+    }
+    .aigr-table td {
+    border-bottom: 1px solid #334155;
+    padding: 8px;
+    font-size: 0.95rem;
+    color: #e2e8f0;
+    background-color: #0f172a;
+    }
+    .aigr-table tr:nth-child(even) td {
+    background-color: #1e293b;
+    }
+    .aigr-card {
+    background: #0f172a;
+    border-radius: 10px;
+    padding: 12px;
+    box-shadow: 0 0 8px rgba(255,255,255,0.05);
+    margin-top: 10px;
+    }
+    </style>
+    """
+
+    html_table = df_small.to_html(classes="aigr-table", index=False, escape=True)
+    title = "<div class='aigr-card'><strong>Tabla: datos relevantes (vista limitada)</strong>"
+    footer = "<p style='font-size:0.85rem;color:#6b7280;margin-top:8px;'>Nota: la tabla muestra una vista limitada y columnas sensibles están enmascaradas.</p></div>"
+
+    return style + title + html_table + footer
 
 # ===========================
 # 2️⃣ OPCIONAL: VISUALIZACIÓN
 # ===========================
 def generate_visualization(results: pd.DataFrame, user_input: str) -> str:
-    import io, base64, matplotlib.pyplot as plt
+    """
+    Genera un gráfico solo si el usuario lo solicita explícitamente.
+    """
+    if not _user_wants_graph(user_input):
+        return ""
 
     try:
-        if not any(w in user_input.lower() for w in ["gráfico", "grafico", "visualiza", "diagrama", "plot", "ver"]):
-            return ""
+        if results is None or results.empty:
+            return "<p>⚠️ No hay datos para graficar.</p>"
 
         numeric_cols = results.select_dtypes(include=["number"]).columns
         categorical_cols = results.select_dtypes(include=["object", "category"]).columns
@@ -77,37 +185,43 @@ def generate_visualization(results: pd.DataFrame, user_input: str) -> str:
         plt.figure(figsize=(8, 5))
 
         if len(numeric_cols) >= 2:
-            results[numeric_cols].corr().plot(kind="heatmap", cmap="coolwarm")
-            plt.title("Mapa de correlación")
+            # mostrar mapa de correlación
+            corr = results[numeric_cols].corr()
+            plt.imshow(corr, cmap="coolwarm", aspect="auto")
+            plt.colorbar()
+            plt.title("Mapa de Correlación")
         elif len(numeric_cols) == 1:
             col = numeric_cols[0]
-            results[col].plot(kind="hist", bins=10, alpha=0.7)
+            results[col].dropna().plot(kind="hist", bins=10)
             plt.title(f"Distribución de {col}")
         elif len(categorical_cols) >= 1:
             col = categorical_cols[0]
-            results[col].value_counts().head(10).plot(kind="barh", color="skyblue")
+            vc = results[col].value_counts().head(10)
+            vc.plot(kind="barh")
             plt.title(f"Frecuencia de {col}")
         else:
             plt.text(0.5, 0.5, "No hay datos visualizables", ha="center")
 
         plt.tight_layout()
         buf = io.BytesIO()
-        plt.savefig(buf, format="png")
+        plt.savefig(buf, format="png", bbox_inches="tight")
         buf.seek(0)
         img_base64 = base64.b64encode(buf.read()).decode("utf-8")
         plt.close()
 
-        return f'<div style="text-align:center;margin-top:10px;"><img src="data:image/png;base64,{img_base64}" alt="Gráfico generado" style="max-width:100%;border-radius:12px;box-shadow:0 0 8px rgba(0,0,0,0.3)"></div>'
+        return f'<div style="text-align:center;margin-top:12px;"><img src="data:image/png;base64,{img_base64}" alt="Gráfico generado" style="max-width:100%;border-radius:10px;box-shadow:0 6px 18px rgba(2,6,23,0.08)"></div>'
     except Exception as e:
         return f"<p style='color:#f87171;'>⚠️ No se pudo generar el gráfico: {e}</p>"
 
 # ===========================
-# 3️⃣ INTERFAZ PRINCIPAL
+# 4️⃣ INTERFAZ PRINCIPAL
 # ===========================
 def generate_report(results: pd.DataFrame, user_input: str) -> str:
     report_text = synthesize_from_results(results, user_input)
+    table_html = generate_table_html(results, user_input)
     visual_html = generate_visualization(results, user_input)
-    return f"<div>{report_text}</div>{visual_html}"
 
+    # convertir markdown a HTML con estilo claro
+    report_html = markdown(report_text)
 
-# ===============================
+    return f"<div style='font-family:Segoe UI, sans-serif;color:#e2e8f0;line-height:1.6;'>{report_html}</div>{table_html}{visual_html}"

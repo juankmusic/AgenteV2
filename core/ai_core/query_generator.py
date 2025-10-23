@@ -82,26 +82,54 @@ def generate_sql_with_openai(plan: dict, schema: dict) -> dict:
 
     prompt = f"""
     Eres un generador experto de SQL para PostgreSQL 15 (compatible con pgvector).
-    Tienes acceso a una base de datos con las siguientes tablas y columnas:
+    Ten en cuenta que el plan puede incluir 'tablas_relacionadas'.
+    Si existen, combina los datos mediante JOIN basados en las claves lógicas (por ejemplo: id_rol, id_cargo, id_equipo, id_usuario, etc.).
+    Nunca pidas datos al usuario: la información está en la base de datos que ya conoces.
 
+    Dispones de la siguiente información del agente inteligente:
+    Plan de acción del agente:
+    {json.dumps(plan, ensure_ascii=False, indent=2)}
+
+    Estructura de la base de datos:
     {schema_json}
 
-    Tu tarea es generar una consulta SQL válida y segura
-    basada en el siguiente plan de acción del agente inteligente:
+    INSTRUCCIONES IMPORTANTES:
 
-    {plan_json}
+    1️⃣ **Contexto Semántico**
+    El texto del usuario y su intención provienen de un modelo cognitivo con embeddings y detección de intención.
+    Esto significa que debes interpretar lo que el usuario *quiere* hacer, no solo las palabras literales.
+    Ejemplo:
+    - Si el usuario habla de “colaboradores” o “empleados”, probablemente se refiere a la tabla `usuario`.
+    - Si menciona “roles”, “cargos” o “equipos”, debes considerar las tablas `rol`, `cargo` y `equipo` respectivamente.
+    - Si menciona “desempeño”, “nivel de contribución” o “evaluación”, involucra `nivel_contribucion` o `evaluacion`.
+    - Si una tabla contiene columnas como 'nombre' o 'descripcion', usa esas columnas en lugar de IDs.
+    - Evita mostrar valores numéricos de referencia (como id_rol o id_cargo).
+    - Siempre usa JOINs para obtener nombres legibles.
+    2️⃣ **Relaciones comunes**
+    Estas relaciones existen y puedes usarlas libremente para crear JOINs:
+    - usuario.id_rol → rol.id
+    - usuario.id_cargo → cargo.id
+    - usuario.id_equipo → equipo.id
+    - usuario.nivel_contribucion_id → nivel_contribucion.id
+    - evaluacion.id_usuario → usuario.id
 
-    Reglas:
-    - No uses DROP, ALTER ni TRUNCATE.
-    - Usa SELECT, INSERT o UPDATE según corresponda.
-    - Si el plan es de tipo 'evaluar' o 'guardar_resultado', genera un INSERT.
-    - Si es de tipo 'consultar_datos' o 'generar_informe', genera un SELECT.
-    - Si el plan menciona embeddings, analiza o busca similitud, usa la tabla 'document_embeddings' con su columna 'embedding'.
-    - Devuelve SOLO un JSON válido con este formato exacto:
+    3️⃣ **Objetivo**
+    Genera una consulta SQL *válida y segura* que satisfaga el propósito del plan del agente, usando las tablas necesarias.
+    Usa filtros si el plan incluye criterios (como equipo, año, periodo, etc.).
+
+    4️⃣ **Política de Seguridad**
+    - Nunca muestres columnas sensibles como contraseñas o embeddings.
+    - Devuelve solo información general, resumida o agregada (por ejemplo: conteos, promedios, o listas de nombres y roles).
+    - Si hay dudas sobre qué mostrar, prioriza información no sensible.
+
+    5️⃣ **Formato de salida**
+    Devuelve SOLO un JSON válido con esta estructura exacta:
     {{
-        "sql": "SELECT ...",
-        "descripcion": "Explicación natural de lo que hará la consulta"
+    "sql": "SELECT ...",
+    "descripcion": "Breve explicación natural de la consulta generada"
     }}
+
+    Tu salida debe ser estrictamente JSON válido, sin texto adicional.
     """
 
     try:

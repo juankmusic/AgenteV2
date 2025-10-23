@@ -108,9 +108,13 @@ def detect_intention(text: str) -> dict:
     Detecta la intención principal del texto combinando:
     - DeepSeek (razonamiento)
     - Embeddings (similitud semántica)
+    y aplica un fallback lógico basado en palabras clave.
     """
+    print(f"🔍 [DEBUG] Texto recibido para análisis de intención: {text}")
+
     # 1️⃣ Predicción directa con DeepSeek
     deepseek_result = classify_intention_deepseek(text)
+    print(f"🧠 [DEBUG] Resultado DeepSeek: {deepseek_result}")
 
     # 2️⃣ Embedding del texto
     user_vec = generate_embedding(text)
@@ -120,29 +124,38 @@ def detect_intention(text: str) -> dict:
         intent: cosine_similarity(user_vec, base_vec)
         for intent, base_vec in BASE_EMBEDDINGS.items()
     }
-
     best_match = max(similarities, key=similarities.get)
     best_score = similarities[best_match]
 
     # 4️⃣ Unificar resultados
-    final_tipo = (
-        deepseek_result.get("tipo")
-        if deepseek_result.get("tipo") != "desconocido"
-        else best_match
-    )
+    final_tipo = deepseek_result.get("tipo")
+    if final_tipo in ["desconocido", None] or best_score < 0.55:
+        final_tipo = best_match
 
-    # 5️⃣ Calcular confianza ponderada (DeepSeek + similitud semántica)
+    # 5️⃣ Fallback semántico adicional
+    txt = text.lower()
+    if any(w in txt for w in ["informe", "reporte", "analisis", "mostrar", "muestrame", "tabla", "consultar", "ver datos"]):
+        final_tipo = "generar_informe"
+    elif any(w in txt for w in ["evaluar", "calificar", "desempeño", "rendimiento"]):
+        final_tipo = "evaluar"
+    elif any(w in txt for w in ["guardar", "registrar", "insertar"]):
+        final_tipo = "guardar_resultado"
+    else:
+        final_tipo = final_tipo or "conversacion_general"
+
+    # 6️⃣ Calcular confianza y extraer entidades
     final_confidence = (
         0.6 * deepseek_result.get("confianza", 0.0)
         + 0.4 * best_score
     )
-
-    # 6️⃣ Extraer entidades semánticas (usando nlp_embeddings)
     entidades = extract_entities(text)
+
+    print(f"✅ [DEBUG] Intención final detectada: {final_tipo} (confianza={round(final_confidence, 3)})")
 
     return {
         "tipo": final_tipo,
         "subtipo": deepseek_result.get("subtipo"),
         "confianza": round(final_confidence, 3),
         "entidades": entidades,
+        "texto": text
     }

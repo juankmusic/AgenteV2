@@ -4,11 +4,13 @@ import sys
 import uuid
 import re
 import pandas as pd
+import psycopg2
 import pypdf
 from dotenv import load_dotenv
 from openai import OpenAI
 from db.connection import connect_db 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import URL
 
 
 # Importar módulos del núcleo de IA'
@@ -138,17 +140,27 @@ def deepseek_chat(question, context=None, history=None):
         print(f"📜 SQL generado:\n{sql}")
 
         # 3.3 Ejecutar SQL
-        conn = connect_db()
         try:
-            engine = create_engine("postgresql+psycopg2://postgres:postgre@localhost:5432/bddesempenoactual")
+            # ✅ Construimos URL con codificación explícita
+            connection_url = URL.create(
+                drivername="postgresql+psycopg2",
+                username="postgres",
+                password="postgre",
+                host="localhost",
+                port=5432,
+                database="bdgestionactual",
+                query={"client_encoding": "WIN1252"}  # 👈 clave: forzar encoding
+            )
+
+            engine = create_engine(connection_url, connect_args={"options": "-c client_encoding=WIN1252"})
             with engine.connect() as connection:
-                query = text(sql)  # <-- aquí pasa el SQL generado por generate_query_from_plan(plan)
-                df = pd.read_sql(query, connection)
+                df = pd.read_sql_query(text(sql), connection)
+
         except Exception as e:
             print(f"❌ Error ejecutando SQL dinámico: {e}")
             df = pd.DataFrame()
         finally:
-            conn.close()
+            connection.close()
 
         # 3.4 Generar informe o acción autónoma
         if plan["accion"] == "guardar_resultado":
