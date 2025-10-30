@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Agente Inteligente 2025</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #0ea5e9;
+      --secondary: #10b981;
+      --bg: #0f172a;
+      --card: rgba(255, 255, 255, 0.05);
+      --text: #e2e8f0;
+      --border: rgba(255, 255, 255, 0.1);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: 'Inter', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      height: 100vh;
+    }
+
+    /* Sidebar */
+    #sidebar {
+      width: 280px;
+      background: rgba(255, 255, 255, 0.03);
+      backdrop-filter: blur(12px);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+      overflow-y: auto;
+    }
+
+    #sidebar h2 {
+      font-size: 1.4rem;
+      text-align: center;
+      margin-bottom: 20px;
+      font-weight: 600;
+    }
+
+    .session {
+      background: var(--card);
+      padding: 12px;
+      margin: 8px 0;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: background 0.3s ease;
+    }
+
+    .session:hover {
+      background: var(--secondary);
+      color: #fff;
+    }
+
+    #new-session-btn {
+      background: var(--primary);
+      border: none;
+      color: white;
+      padding: 12px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-weight: 600;
+      transition: background 0.3s ease;
+    }
+
+    #new-session-btn:hover {
+      background: #0284c7;
+    }
+
+    /* Chat container */
+    #chat-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+
+    #messages {
+      flex: 1;
+      padding: 30px 20px;
+      overflow-y: auto;
+      background: #1e293b;
+    }
+
+    .message-wrapper {
+      display: flex;
+      margin: 10px 0;
+    }
+
+    .message-wrapper.left {
+      justify-content: flex-end;
+    }
+
+    .message-wrapper.right {
+      justify-content: flex-start;
+    }
+
+    .message {
+      padding: 14px 20px;
+      border-radius: 18px;
+      max-width: 70%;
+      line-height: 1.6;
+      background: var(--card);
+      backdrop-filter: blur(8px);
+      color: var(--text);
+      border: 1px solid var(--border);
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+
+    .user-msg {
+      background: var(--primary);
+      color: white;
+      border-bottom-left-radius: 0;
+    }
+
+    .bot-msg {
+      background: #334155;
+      color: #f1f5f9;
+      border-bottom-right-radius: 0;
+      overflow-x: auto; /* para tablas anchas */
+    }
+
+    .bot-msg table, 
+    .bot-msg th, 
+    .bot-msg td {
+      color: #f1f5f9 !important;  /* texto legible */
+    }
+
+    .bot-msg strong {
+      color: #38bdf8; /* títulos más visibles */
+    }
+
+    /* Input area */
+    #input-area {
+      display: flex;
+      align-items: center;
+      padding: 16px 20px;
+      background: #0f172a;
+      border-top: 1px solid var(--border);
+    }
+
+    #user-input {
+      flex: 1;
+      padding: 14px 16px;
+      border-radius: 12px;
+      border: none;
+      font-size: 1rem;
+      outline: none;
+      background: #1e293b;
+      color: white;
+    }
+
+    .chat-btn {
+      background: var(--card);
+      border: 1px solid var(--border);
+      margin-left: 10px;
+      padding: 10px;
+      border-radius: 10px;
+      cursor: pointer;
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: 0.2s;
+    }
+
+    .chat-btn:hover {
+      background: var(--secondary);
+      border-color: transparent;
+    }
+
+    .material-icons {
+      font-size: 20px;
+    }
+
+    #file-input {
+      display: none;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: #64748b;
+      border-radius: 4px;
+    }
+
+    @media (max-width: 768px) {
+      #sidebar {
+        display: none;
+      }
+
+      body {
+        flex-direction: column;
+      }
+
+      #input-area {
+        flex-wrap: wrap;
+      }
+
+      .chat-btn {
+        margin-top: 10px;
+      }
+    }
+
+  </style>
+</head>
+
+<body>
+
+<!-- Sidebar -->
+<div id="sidebar">
+  <h2>💬 Sesiones</h2>
+  <div id="sessions"></div>
+  <button id="new-session-btn">+ Nueva sesión</button>
+  <input type="file" id="file-input" />
+</div>
+
+<!-- Chat Container -->
+<div id="chat-container">
+  <div id="messages"></div>
+  <div id="input-area">
+    <input type="text" id="user-input" placeholder="Escribe tu mensaje..." />
+    <button class="chat-btn" id="file-btn" title="Subir archivo">
+      <span class="material-icons">attach_file</span>
+    </button>
+    <button class="chat-btn" id="voice-btn" title="Hablar">
+      <span class="material-icons">mic</span>
+    </button>
+    <button class="chat-btn" id="send-btn" title="Enviar">
+      <span class="material-icons">send</span>
+    </button>
+  </div>
+</div>
+
+<script>
+let currentSessionId = null;
+let currentFile = null; // Para mantener el archivo asociado a la sesión
+
+// Cargar sesiones anteriores
+function loadSessions() {
+    fetch("/sessions")
+        .then(res => res.json())
+        .then(data => {
+            const sessionsDiv = document.getElementById("sessions");
+            sessionsDiv.innerHTML = '';
+            data.sessions.forEach(s => {
+                const div = document.createElement("div");
+                div.className = "session";
+                div.innerText = s.session_id + " (" + s.msg_count + " msgs)";
+                div.onclick = () => selectSession(s.session_id);
+                sessionsDiv.appendChild(div);
+            });
+        });
+}
+
+// Seleccionar sesión
+function selectSession(sessionId) {
+    currentSessionId = sessionId;
+    // Pedimos también cuál es el archivo activo si existe
+    fetch(`/history?session_id=${currentSessionId}`)
+        .then(res => res.json())
+        .then(data => {
+            const messagesDiv = document.getElementById("messages");
+            messagesDiv.innerHTML = '';
+            data.history.forEach(msg => {
+                appendMessage(msg.message, msg.role === "user" ? "user-msg" : "bot-msg");
+            });
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        });
+
+    // Recuperar archivo asociado (si lo quieres mantener)
+    fetch(`/get_active_file?session_id=${currentSessionId}`)
+        .then(res => res.json())
+        .then(data => {
+            currentFile = data.file || null;
+        });
+}
+
+// Cargar historial de la sesión actual
+function loadHistory() {
+    if (!currentSessionId) return;
+    fetch(`/history?session_id=${currentSessionId}`)
+        .then(res => res.json())
+        .then(data => {
+            const messagesDiv = document.getElementById("messages");
+            messagesDiv.innerHTML = '';
+            data.history.forEach(msg => {
+                appendMessage(msg.message, msg.role==="user"?"user-msg":"bot-msg");
+            });
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        });
+}
+
+// Enviar mensaje
+function sendMessage() {
+    const input = document.getElementById("user-input");
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    appendMessage(text, 'user-msg');
+
+    fetch("/chat", {
+        method: "POST",
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+            message: text,
+            session_id: currentSessionId,
+            uploaded_file: currentFile // enviamos el archivo asociado
+        })
+    })
+    .then(res => res.json())
+    .then(data => {
+        appendMessage(data.response, 'bot-msg');
+        // Mantener la sesión y archivo actual
+        currentSessionId = data.session_id;
+        currentFile = data.source_file || currentFile;
+    });
+}
+
+// Añade mensaje al chat
+function appendMessage(msg, cls) {
+    const messagesDiv = document.getElementById("messages");
+
+    const wrapper = document.createElement("div");
+    wrapper.className = "message-wrapper " + (cls === "user-msg" ? "left" : "right");
+
+    const div = document.createElement("div");
+    div.className = "message " + cls;
+    div.innerHTML = msg;
+
+    wrapper.appendChild(div);
+    messagesDiv.appendChild(wrapper);
+    messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+
+// Botones
+document.getElementById("send-btn").onclick = sendMessage;
+document.getElementById("user-input").addEventListener("keydown", e => { if(e.key==="Enter") sendMessage(); });
+
+document.getElementById("file-btn").onclick = () => document.getElementById("file-input").click();
+document.getElementById("file-input").addEventListener("change", function() {
+    const file = this.files[0];
+    const formData = new FormData();
+    formData.append("file", file);
+    fetch("/upload", {method:"POST", body:formData})
+        .then(res => res.json())
+        .then(data => {
+            alert(data.message);
+            currentFile = file.name; // Guardar el archivo en la sesión actual
+        });
+});
+
+// VOZ
+
+let mediaRecorder;
+let audioChunks = [];
+
+// Botón de voz
+const voiceBtn = document.getElementById("voice-btn");
+
+voiceBtn.onclick = async () => {
+    if (!mediaRecorder || mediaRecorder.state === "inactive") {
+        // Solicitar acceso al micrófono
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        mediaRecorder = new MediaRecorder(stream);
+
+        audioChunks = [];
+        mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
+
+        mediaRecorder.onstop = async () => {
+            const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+            const formData = new FormData();
+            formData.append("file", audioBlob, "audio.wav");
+
+            try {
+                const res = await fetch("/voice", { method: "POST", body: formData });
+                const data = await res.json();
+                if (data.error) {
+                    alert("❌ Error transcripción: " + data.error);
+                } else {
+                    const transcription = data.transcription;
+                    appendMessage(transcription, "user-msg"); // muestra en pantalla
+
+                    // Enviar transcripción como mensaje normal al bot
+                    fetch("/chat", {
+                        method: "POST",
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            message: transcription,
+                            session_id: currentSessionId
+                        })
+                    })
+                    .then(res => res.json())
+                    .then(chatData => {
+                        appendMessage(chatData.response, "bot-msg");
+                    });
+
+                }
+            } catch (err) {
+                console.error(err);
+                alert("❌ Error enviando audio");
+            }
+        };
+
+
+        mediaRecorder.start();
+        voiceBtn.innerText = "⏹ Detener";
+    } else if (mediaRecorder.state === "recording") {
+        mediaRecorder.stop();
+        voiceBtn.innerText = "🎤";
+    }
+};
+
+
+// Nueva sesión
+document.getElementById("new-session-btn").onclick = () => {
+    fetch("/new_session")
+        .then(res => res.json())
+        .then(data => {
+            currentSessionId = data.session_id;
+            currentFile = null;
+            document.getElementById("messages").innerHTML = '';
+            document.getElementById("file-input").value = '';
+            loadSessions();
+        });
+};
+
+// Inicializar
+loadSessions();
+loadHistory();
+
+</script>
+
+</body>
+</html>
