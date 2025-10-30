@@ -1,0 +1,779 @@
+{
+  "apartado": {
+    "columns": {
+      "id": "integer",
+      "nombre": "character varying"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {}
+  },
+  "archivo_adjunto": {
+    "columns": {
+      "id": "integer",
+      "nombre": "character varying",
+      "url": "character varying",
+      "usuario_id": "integer"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "usuario_id": {
+        "references": "usuario.id"
+      }
+    }
+  },
+  "cargo": {
+    "columns": {
+      "id": "integer",
+      "nombre": "character varying"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {}
+  },
+  "categoria": {
+    "columns": {
+      "id": "integer",
+      "nombre": "character varying",
+      "descripcion": "character varying"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {},
+    "description": "Define categorías o grupos para clasificar cursos, recursos u otros elementos.",
+    "synonyms": [
+      "grupo",
+      "tipo",
+      "clase"
+    ]
+  },
+  "certificado": {
+    "columns": {
+      "id": "integer",
+      "usuario_id": "integer",
+      "curso_id": "integer",
+      "fecha_emision": "date"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "curso_id": {
+        "references": "cursos.id"
+      },
+      "usuario_id": {
+        "references": "usuario.id"
+      }
+    }
+  },
+  "chatbot_logs": {
+    "columns": {
+      "id": "integer",
+      "session_id": "character varying",
+      "role": "character varying",
+      "message": "text",
+      "timestamp": "timestamp with time zone"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {}
+  },
+  "comentario": {
+    "columns": {
+      "id": "integer",
+      "usuario_id": "integer",
+      "contenido": "text",
+      "fecha": "timestamp without time zone"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "usuario_id": {
+        "references": "usuario.id"
+      }
+    }
+  },
+  "configuracion_usuario": {
+    "columns": {
+      "id": "integer",
+      "usuario_id": "integer",
+      "tema": "character varying",
+      "idioma": "character varying"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "usuario_id": {
+        "references": "usuario.id"
+      }
+    }
+  },
+  "cursos": {
+    "columns": {
+      "id": "integer",
+      "nombre": "character varying",
+      "tipo": "character varying",
+      "fk_categoria_id": "integer",
+      "fecha_limite_inscripcion": "date",
+      "fecha_inicio": "date",
+      "fecha_fin": "date",
+      "categoria_id": "integer"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "fk_categoria_id": {
+        "references": "categoria.id"
+      },
+      "categoria_id": {
+        "references": "categoria.id"
+      }
+    },
+    "description": "Registra los cursos de formación disponibles en la plataforma, con sus fechas y categorías.",
+    "synonyms": [
+      "curso",
+      "formación",
+      "capacitación",
+      "entrenamiento",
+      "learning"
+    ]
+  },
+  "dimension": {
+    "columns": {
+      "id_dimension": "integer",
+      "nombre_dimension": "character varying",
+      "definicion_dimension": "character varying"
+    },
+    "primary_key": [
+      "id_dimension"
+    ],
+    "foreign_keys": {}
+  },
+  "dimension_pregunta": {
+    "columns": {
+      "id": "integer",
+      "id_dimension": "integer",
+      "id_pregunta": "integer"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "id_dimension": {
+        "references": "dimension.id_dimension"
+      },
+      "id_pregunta": {
+        "references": "pregunta.id"
+      }
+    }
+  },
+  "dimension_respuesta_guardada": {
+    "columns": {
+      "id": "integer",
+      "id_usuario": "integer",
+      "id_dimension": "integer",
+      "id_pregunta": "integer",
+      "id_respuesta": "integer"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "id_dimension": {
+        "references": "dimension.id_dimension"
+      },
+      "id_pregunta": {
+        "references": "pregunta.id"
+      },
+      "id_respuesta": {
+        "references": "respuesta.id"
+      },
+      "id_usuario": {
+        "references": "usuario.id"
+      }
+    }
+  },
+  "document_embeddings": {
+    "columns": {
+      "id": "uuid",
+      "text_chunk": "text",
+      "source_filename": "text",
+      "page_number": "integer",
+      "chunk_hash": "text",
+      "embedding": "USER-DEFINED"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {}
+  },
+  "encuesta": {
+    "columns": {
+      "id": "integer",
+      "titulo": "character varying",
+      "descripcion": "text"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {}
+  },
+  "equipo": {
+    "columns": {
+      "id": "integer",
+      "nombre": "character varying"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {}
+  },
+  "evaluacion": {
+    "columns": {
+      "id": "integer",
+      "fecha": "date",
+      "usuario_id": "integer",
+      "evaluador_id": "integer"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "evaluador_id": {
+        "references": "usuario.id"
+      },
+      "usuario_id": {
+        "references": "usuario.id"
+      }
+    },
+    "description": "Guarda las evaluaciones de desempeño o retroalimentaciones hechas a los usuarios.",
+    "synonyms": [
+      "desempeño",
+      "valoración",
+      "feedback",
+      "revisión"
+    ]
+  },
+  "favorito_video": {
+    "columns": {
+      "id": "integer",
+      "video_id": "integer",
+      "usuario_id": "integer"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "usuario_id": {
+        "references": "usuario.id"
+      },
+      "video_id": {
+        "references": "video.id"
+      }
+    }
+  },
+  "indicador": {
+    "columns": {
+      "id": "integer",
+      "nombre": "character varying",
+      "descripcion": "text",
+      "seccion_id": "integer",
+      "fecha_medicion": "date",
+      "valor_indicador": "numeric",
+      "fk_id_microproyecto": "integer"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "fk_id_microproyecto": {
+        "references": "micro_proyecto.id"
+      },
+      "seccion_id": {
+        "references": "seccion.id"
+      }
+    },
+    "description": "Contiene métricas o KPIs asociados a desempeño o proyectos.",
+    "synonyms": [
+      "kpi",
+      "métrica",
+      "indicador de desempeño"
+    ]
+  },
+  "inscripcion_curso": {
+    "columns": {
+      "id": "integer",
+      "curso_id": "integer",
+      "usuario_id": "integer",
+      "fecha_inscripcion": "date"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "curso_id": {
+        "references": "cursos.id"
+      },
+      "usuario_id": {
+        "references": "usuario.id"
+      }
+    }
+  },
+  "log_acceso": {
+    "columns": {
+      "id": "integer",
+      "usuario_id": "integer",
+      "fecha_hora": "timestamp without time zone",
+      "accion": "character varying"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "usuario_id": {
+        "references": "usuario.id"
+      }
+    }
+  },
+  "micro_proyecto": {
+    "columns": {
+      "id": "integer",
+      "nombre": "character varying",
+      "id_proyecto": "integer",
+      "lider_id": "integer"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "id_proyecto": {
+        "references": "proyecto.id"
+      },
+      "lider_id": {
+        "references": "usuario.id"
+      }
+    }
+  },
+  "nivel_contribucion": {
+    "columns": {
+      "id_nivel": "integer",
+      "tipo_nivel": "integer",
+      "nivel_de_contribucion": "character varying"
+    },
+    "primary_key": [
+      "id_nivel"
+    ],
+    "foreign_keys": {}
+  },
+  "notificacion": {
+    "columns": {
+      "id": "integer",
+      "mensaje": "character varying",
+      "usuario_id": "integer",
+      "leida": "boolean"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "usuario_id": {
+        "references": "usuario.id"
+      }
+    }
+  },
+  "podcast": {
+    "columns": {
+      "id": "integer",
+      "titulo": "character varying",
+      "url": "character varying",
+      "tipo": "character varying"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {}
+  },
+  "pregunta": {
+    "columns": {
+      "id": "integer",
+      "texto": "character varying",
+      "origen": "character varying",
+      "nivel_contribucion_id": "integer",
+      "dimension_id": "integer"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "dimension_id": {
+        "references": "dimension.id_dimension"
+      },
+      "nivel_contribucion_id": {
+        "references": "nivel_contribucion.id_nivel"
+      }
+    },
+    "description": "Preguntas que forman parte de encuestas, evaluaciones o formularios.",
+    "synonyms": [
+      "ítem",
+      "reactivo",
+      "pregunta de encuesta"
+    ]
+  },
+  "pregunta_encuesta": {
+    "columns": {
+      "id": "integer",
+      "texto": "character varying",
+      "encuesta_id": "integer"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "encuesta_id": {
+        "references": "encuesta.id"
+      }
+    }
+  },
+  "progreso_usuario": {
+    "columns": {
+      "id": "integer",
+      "usuario_id": "integer",
+      "curso_id": "integer",
+      "porcentaje": "double precision"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "curso_id": {
+        "references": "cursos.id"
+      },
+      "usuario_id": {
+        "references": "usuario.id"
+      }
+    },
+    "description": "Registra el avance y progreso de cada usuario en los cursos asignados.",
+    "synonyms": [
+      "progreso",
+      "avance",
+      "seguimiento",
+      "tracking"
+    ]
+  },
+  "progreso_video": {
+    "columns": {
+      "id": "integer",
+      "video_id": "integer",
+      "usuario_id": "integer",
+      "segundos_vistos": "integer"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "usuario_id": {
+        "references": "usuario.id"
+      },
+      "video_id": {
+        "references": "video.id"
+      }
+    }
+  },
+  "proyecto": {
+    "columns": {
+      "id": "integer",
+      "nombre": "character varying",
+      "descripcion": "text",
+      "fecha_inicio": "date",
+      "fecha_fin": "date"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {},
+    "description": "Información de proyectos o iniciativas desarrolladas por los usuarios.",
+    "synonyms": [
+      "plan",
+      "actividad",
+      "iniciativa"
+    ]
+  },
+  "recurso": {
+    "columns": {
+      "id": "integer",
+      "nombre": "character varying",
+      "tipo": "character varying",
+      "url": "character varying"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {}
+  },
+  "reporte": {
+    "columns": {
+      "id": "integer",
+      "nombre": "character varying",
+      "descripcion": "text",
+      "fecha_generacion": "timestamp without time zone",
+      "usuario_id": "integer"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "usuario_id": {
+        "references": "usuario.id"
+      }
+    }
+  },
+  "respuesta": {
+    "columns": {
+      "id": "integer",
+      "texto": "character varying",
+      "origen": "character varying",
+      "pregunta_id": "integer",
+      "ILUO": "character varying",
+      "valor_respuesta": "integer",
+      "descripcion_iluo": "character varying",
+      "ruta_desarrollo": "character varying",
+      "ruta_autodesarrollo": "character varying"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "pregunta_id": {
+        "references": "pregunta.id"
+      }
+    },
+    "description": "Respuestas seleccionadas o escritas por los usuarios.",
+    "synonyms": [
+      "contestación",
+      "opción",
+      "resultado"
+    ]
+  },
+  "respuesta_dimension": {
+    "columns": {
+      "id": "integer",
+      "id_usuario": "integer",
+      "id_dimension": "integer",
+      "id_pregunta": "integer",
+      "id_respuesta": "integer",
+      "fecha_respuesta": "date"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "id_dimension": {
+        "references": "dimension.id_dimension"
+      },
+      "id_pregunta": {
+        "references": "pregunta.id"
+      },
+      "id_respuesta": {
+        "references": "respuesta.id"
+      },
+      "id_usuario": {
+        "references": "usuario.id"
+      }
+    }
+  },
+  "respuesta_encuesta": {
+    "columns": {
+      "id": "integer",
+      "usuario_id": "integer",
+      "pregunta_id": "integer",
+      "respuesta": "text"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "pregunta_id": {
+        "references": "pregunta_encuesta.id"
+      },
+      "usuario_id": {
+        "references": "usuario.id"
+      }
+    }
+  },
+  "resultado_evaluacion": {
+    "columns": {
+      "id": "integer",
+      "evaluacion_id": "integer",
+      "indicador_id": "integer",
+      "valor": "double precision"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "evaluacion_id": {
+        "references": "evaluacion.id"
+      },
+      "indicador_id": {
+        "references": "indicador.id"
+      }
+    }
+  },
+  "rol": {
+    "columns": {
+      "id": "integer",
+      "nombre": "character varying"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {}
+  },
+  "seccion": {
+    "columns": {
+      "id": "integer",
+      "nombre": "character varying"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {}
+  },
+  "seguimiento": {
+    "columns": {
+      "id": "integer",
+      "fecha": "date",
+      "descripcion": "text",
+      "proyecto_id": "integer",
+      "usuario_id": "integer"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "proyecto_id": {
+        "references": "proyecto.id"
+      },
+      "usuario_id": {
+        "references": "usuario.id"
+      }
+    }
+  },
+  "sesion": {
+    "columns": {
+      "id": "integer",
+      "usuario_id": "integer",
+      "inicio": "timestamp without time zone",
+      "fin": "timestamp without time zone"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "usuario_id": {
+        "references": "usuario.id"
+      }
+    }
+  },
+  "tipo_recurso": {
+    "columns": {
+      "id": "integer",
+      "nombre": "character varying"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {}
+  },
+  "tipo_video": {
+    "columns": {
+      "id": "integer",
+      "nombre": "character varying"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {}
+  },
+  "usuario": {
+    "columns": {
+      "id": "integer",
+      "nombre": "character varying",
+      "correo": "character varying",
+      "contrasena": "character varying",
+      "id_rol": "integer",
+      "id_cargo": "integer",
+      "id_equipo": "integer",
+      "nivel_contribucion_id": "integer"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "id_cargo": {
+        "references": "cargo.id"
+      },
+      "id_equipo": {
+        "references": "equipo.id"
+      },
+      "nivel_contribucion_id": {
+        "references": "nivel_contribucion.id_nivel"
+      },
+      "id_rol": {
+        "references": "rol.id"
+      }
+    },
+    "description": "Contiene los datos personales, credenciales y rol de los colaboradores o empleados.",
+    "synonyms": [
+      "colaborador",
+      "empleado",
+      "persona",
+      "trabajador",
+      "user",
+      "usuarios"
+    ]
+  },
+  "usuario_apartado": {
+    "columns": {
+      "id": "integer",
+      "id_usuario": "integer",
+      "id_apartado": "integer"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "id_apartado": {
+        "references": "apartado.id"
+      },
+      "id_usuario": {
+        "references": "usuario.id"
+      }
+    }
+  },
+  "video": {
+    "columns": {
+      "id": "integer",
+      "titulo": "character varying",
+      "url": "character varying",
+      "tipo_id": "integer"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "tipo_id": {
+        "references": "tipo_video.id"
+      }
+    }
+  }
+}

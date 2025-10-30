@@ -1,3 +1,4 @@
+# core/ai_core/query_generator.py
 import os
 import re
 import json
@@ -18,18 +19,20 @@ openai_client = OpenAIClient(api_key=OPENAI_API_KEY)
 # ======================================================
 def get_database_schema():
     """
-    Recupera todas las tablas y columnas del esquema 'public' en PostgreSQL.
-    Excluye vistas y tablas del sistema (pg_*, sql_*).
-    Devuelve un diccionario estructurado {tabla: [{columna, tipo}, ...]}.
+    Recupera todas las tablas y columnas del esquema 'public' en PostgreSQL,
+    junto con las claves foráneas para que el modelo pueda generar consultas más completas.
     """
     schema = {}
+    foreign_keys = []  # Asegúrate de definir esta variable fuera de la consulta
+
     conn = connect_db()
     if not conn:
         print("❌ No se pudo conectar a la base de datos.")
-        return schema
+        return schema, foreign_keys  # Cambié para devolver las claves foráneas también
 
     try:
         with conn.cursor() as cur:
+            # Obtener tablas y columnas
             cur.execute("""
                 SELECT table_name, column_name, data_type
                 FROM information_schema.columns
@@ -39,21 +42,39 @@ def get_database_schema():
                 ORDER BY table_name, ordinal_position;
             """)
             rows = cur.fetchall()
-
             for table, col, dtype in rows:
                 schema.setdefault(table, []).append({
                     "columna": col,
                     "tipo": dtype
                 })
+            
+            # Obtener relaciones entre tablas (clave foránea)
+            cur.execute("""
+                SELECT
+                    tc.table_name, kcu.column_name, ccu.table_name AS foreign_table_name,
+                    ccu.column_name AS foreign_column_name
+                FROM 
+                    information_schema.table_constraints AS tc
+                JOIN 
+                    information_schema.key_column_usage AS kcu
+                    ON tc.constraint_name = kcu.constraint_name
+                JOIN 
+                    information_schema.constraint_column_usage AS ccu
+                    ON ccu.constraint_name = tc.constraint_name
+                WHERE 
+                    tc.constraint_type = 'FOREIGN KEY' AND tc.table_schema = 'public';
+            """)
+            foreign_keys = cur.fetchall()
 
-        print(f"📚 Esquema detectado: {len(schema)} tablas encontradas.")
-        return schema
+        print(f"📚 Esquema con relaciones detectado: {len(schema)} tablas encontradas.")
+        return schema, foreign_keys  # Devuelve las claves foráneas también
 
     except Exception as e:
         print(f"❌ Error obteniendo esquema: {e}")
-        return {}
+        return {}, []  # Devuelve listas vacías en caso de error
     finally:
         conn.close()
+
 
 # ======================================================
 # 2️⃣ FUNCIÓN: VALIDAR CONSULTAS SQL
@@ -72,64 +93,42 @@ def validate_sql(sql: str) -> bool:
 # ======================================================
 # 3️⃣ FUNCIÓN PRINCIPAL: GENERAR CONSULTA SQL
 # ======================================================
-def generate_sql_with_openai(plan: dict, schema: dict) -> dict:
+def generate_sql_with_openai(plan: dict, schema: dict, foreign_keys: list) -> dict:
     """
     Usa un modelo de lenguaje para generar una consulta SQL válida y segura
     basada en el plan de acción del agente y el esquema real de la base.
     """
     plan_json = json.dumps(plan, ensure_ascii=False, indent=2)
     schema_json = json.dumps(schema, ensure_ascii=False, indent=2)
+    foreign_keys_json = json.dumps(foreign_keys, ensure_ascii=False, indent=2)
 
     prompt = f"""
-    Eres un generador experto de SQL para PostgreSQL 15 (compatible con pgvector).
-    Ten en cuenta que el plan puede incluir 'tablas_relacionadas'.
-    Si existen, combina los datos mediante JOIN basados en las claves lógicas (por ejemplo: id_rol, id_cargo, id_equipo, id_usuario, etc.).
-    Nunca pidas datos al usuario: la información está en la base de datos que ya conoces.
+    Eres un generador experto de SQL para PostgreSQL. Tu tarea es generar consultas SQL válidas y seguras basadas en los siguientes datos:
 
-    Dispones de la siguiente información del agente inteligente:
-    Plan de acción del agente:
-    {json.dumps(plan, ensure_ascii=False, indent=2)}
+    1️⃣ **Plan de acción del agente**:
+    {plan_json}
 
-    Estructura de la base de datos:
+    2️⃣ **Esquema de la base de datos**:
     {schema_json}
 
-    INSTRUCCIONES IMPORTANTES:
+    3️⃣ **Relaciones importantes**: 
+    A continuación se listan las claves foráneas que puedes utilizar para realizar los `JOIN` entre tablas:
+    {foreign_keys_json}
 
-    1️⃣ **Contexto Semántico**
-    El texto del usuario y su intención provienen de un modelo cognitivo con embeddings y detección de intención.
-    Esto significa que debes interpretar lo que el usuario *quiere* hacer, no solo las palabras literales.
-    Ejemplo:
-    - Si el usuario habla de “colaboradores” o “empleados”, probablemente se refiere a la tabla `usuario`.
-    - Si menciona “roles”, “cargos” o “equipos”, debes considerar las tablas `rol`, `cargo` y `equipo` respectivamente.
-    - Si menciona “desempeño”, “nivel de contribución” o “evaluación”, involucra `nivel_contribucion` o `evaluacion`.
-    - Si una tabla contiene columnas como 'nombre' o 'descripcion', usa esas columnas en lugar de IDs.
-    - Evita mostrar valores numéricos de referencia (como id_rol o id_cargo).
-    - Siempre usa JOINs para obtener nombres legibles.
-    2️⃣ **Relaciones comunes**
-    Estas relaciones existen y puedes usarlas libremente para crear JOINs:
-    - usuario.id_rol → rol.id
-    - usuario.id_cargo → cargo.id
-    - usuario.id_equipo → equipo.id
-    - usuario.nivel_contribucion_id → nivel_contribucion.id
-    - evaluacion.id_usuario → usuario.id
+    4️⃣ **Instrucciones**:
+    - Debes utilizar las claves foráneas para realizar `JOIN` entre las tablas relacionadas cuando sea necesario.
+    - Si el plan menciona una tabla o columna, interpreta el contexto semántico para saber qué tabla y qué columna utilizar.
+    - Asegúrate de que la consulta sea **segura** y que no contenga comandos destructivos como `DROP`, `DELETE` sin `WHERE`, o `TRUNCATE`.
+    - Genera una consulta que **respete las relaciones y restricciones de la base de datos**.
 
-    3️⃣ **Objetivo**
-    Genera una consulta SQL *válida y segura* que satisfaga el propósito del plan del agente, usando las tablas necesarias.
-    Usa filtros si el plan incluye criterios (como equipo, año, periodo, etc.).
+    Recuerda: nunca pidas datos al usuario, la información que necesitas está en la base de datos.
 
-    4️⃣ **Política de Seguridad**
-    - Nunca muestres columnas sensibles como contraseñas o embeddings.
-    - Devuelve solo información general, resumida o agregada (por ejemplo: conteos, promedios, o listas de nombres y roles).
-    - Si hay dudas sobre qué mostrar, prioriza información no sensible.
-
-    5️⃣ **Formato de salida**
-    Devuelve SOLO un JSON válido con esta estructura exacta:
+    **Salida esperada**:
+    Genera SOLO un JSON válido con la estructura:
     {{
-    "sql": "SELECT ...",
-    "descripcion": "Breve explicación natural de la consulta generada"
+        "sql": "SELECT ...",
+        "descripcion": "Breve descripción de lo que hace la consulta generada."
     }}
-
-    Tu salida debe ser estrictamente JSON válido, sin texto adicional.
     """
 
     try:
@@ -176,12 +175,12 @@ def generate_query_from_plan(plan: dict) -> dict:
     Lee la estructura de la base de datos y genera una consulta SQL
     a partir del plan de acción del agente inteligente.
     """
-    schema = get_database_schema()
+    schema, foreign_keys = get_database_schema()  # Ahora obtiene también las claves foráneas
     if not schema:
         print("⚠️ No se pudo obtener el esquema de la base de datos.")
         return {"sql": None, "descripcion": "Error al obtener el esquema."}
 
-    result = generate_sql_with_openai(plan, schema)
+    result = generate_sql_with_openai(plan, schema, foreign_keys)  # Pasa las claves foráneas también
 
     if result.get("sql"):
         print(f"📜 Consulta generada exitosamente.")
@@ -189,3 +188,4 @@ def generate_query_from_plan(plan: dict) -> dict:
         print(f"⚠️ No se pudo generar la consulta SQL.")
 
     return result
+

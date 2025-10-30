@@ -8,7 +8,10 @@ import base64
 from datetime import datetime
 from dotenv import load_dotenv
 from openai import OpenAI as OpenAIClient
+import matplotlib
+matplotlib.use("Agg")  # backend sin interfaz gráfica (ideal para servidores)
 import matplotlib.pyplot as plt
+
 from markdown import markdown 
 
 # ===========================
@@ -27,6 +30,27 @@ SENSITIVE_COLS = {"correo", "contrasena", "password", "email", "telefono", "tel"
 # Palabras que indican que el usuario quiere una tabla o un gráfico
 TABLE_KEYWORDS = ["tabla", "muéstrame una tabla", "muestrame una tabla", "mostrar tabla", "mostrar una tabla", "tabla con"]
 GRAPH_KEYWORDS = ["gráfico", "grafico", "visualiza", "muestra un gráfico", "plot", "grafique", "visualizar"]
+# Tipos específicos de gráficos
+GRAPH_TYPE_KEYWORDS = {
+    "barras": "bar",
+    "barras horizontales": "barh",
+    "circular": "pie",
+    "pastel": "pie",
+    "líneas": "line",
+    "lineas": "line",
+    "dispersión": "scatter",
+    "puntos": "scatter"
+}
+
+def _detect_graph_type(user_input: str) -> str:
+    """
+    Detecta el tipo de gráfico solicitado por el usuario a partir del texto.
+    """
+    txt = user_input.lower()
+    for key, gtype in GRAPH_TYPE_KEYWORDS.items():
+        if key in txt:
+            return gtype
+    return "auto"  # por defecto
 
 # ===========================
 # UTILIDADES
@@ -170,7 +194,7 @@ def generate_table_html(results: pd.DataFrame, user_input: str) -> str:
 # ===========================
 def generate_visualization(results: pd.DataFrame, user_input: str) -> str:
     """
-    Genera un gráfico solo si el usuario lo solicita explícitamente.
+    Genera un gráfico basado en la intención del usuario (barras, circular, líneas, etc.).
     """
     if not _user_wants_graph(user_input):
         return ""
@@ -179,29 +203,86 @@ def generate_visualization(results: pd.DataFrame, user_input: str) -> str:
         if results is None or results.empty:
             return "<p>⚠️ No hay datos para graficar.</p>"
 
+        graph_type = _detect_graph_type(user_input)
         numeric_cols = results.select_dtypes(include=["number"]).columns
         categorical_cols = results.select_dtypes(include=["object", "category"]).columns
 
         plt.figure(figsize=(8, 5))
 
-        if len(numeric_cols) >= 2:
-            # mostrar mapa de correlación
-            corr = results[numeric_cols].corr()
-            plt.imshow(corr, cmap="coolwarm", aspect="auto")
-            plt.colorbar()
-            plt.title("Mapa de Correlación")
-        elif len(numeric_cols) == 1:
-            col = numeric_cols[0]
-            results[col].dropna().plot(kind="hist", bins=10)
-            plt.title(f"Distribución de {col}")
-        elif len(categorical_cols) >= 1:
-            col = categorical_cols[0]
-            vc = results[col].value_counts().head(10)
-            vc.plot(kind="barh")
-            plt.title(f"Frecuencia de {col}")
-        else:
-            plt.text(0.5, 0.5, "No hay datos visualizables", ha="center")
+        # ========== Tipos de gráfico solicitados ==========
+        if graph_type in ["bar", "barh"]:
+            col = categorical_cols[0] if len(categorical_cols) else results.columns[0]
+            val = numeric_cols[0] if len(numeric_cols) else None
+            data = results.groupby(col)[val].sum() if val else results[col].value_counts()
+            data.plot(kind=graph_type)
+            plt.title(f"Gráfico de {graph_type} de {col}")
 
+        elif graph_type == "pie":
+            col = categorical_cols[0] if len(categorical_cols) else results.columns[0]
+
+            # Si hay columna de conteo numérico (ej: "cantidad"), usarla; si no, usar value_counts()
+            count_col = None
+            numeric_cols = results.select_dtypes(include=["number"]).columns
+            for ncol in numeric_cols:
+                if ncol.lower() in ["cantidad", "count", "total"]:  # posibles nombres comunes
+                    count_col = ncol
+                    break
+
+            if count_col:
+                sizes = results[count_col]
+                labels = results[col]
+            else:
+                vc = results[col].value_counts().head(6)
+                labels = vc.index
+                sizes = vc.values
+
+            plt.figure(figsize=(6,6))
+            plt.pie(sizes, labels=labels, autopct="%1.1f%%", startangle=90)
+            plt.title(f"Distribución de {col}")
+            plt.axis("equal")  # círculo perfecto
+
+
+        elif graph_type == "line":
+            if len(numeric_cols) >= 2:
+                results.plot(x=numeric_cols[0], y=numeric_cols[1:], kind="line")
+            else:
+                col = numeric_cols[0] if len(numeric_cols) else results.columns[0]
+                results[col].plot(kind="line")
+            plt.title("Evolución temporal o secuencial")
+
+        elif graph_type == "scatter":
+            # Permitir scatter incluso si las columnas son categóricas
+            if len(categorical_cols) >= 2:
+                x = pd.factorize(results[categorical_cols[0]])[0]
+                y = pd.factorize(results[categorical_cols[1]])[0]
+                plt.scatter(x, y)
+
+                # Etiquetas de los ticks
+                plt.xticks(range(len(results[categorical_cols[0]].unique())), results[categorical_cols[0]].unique(), rotation=45)
+                plt.yticks(range(len(results[categorical_cols[1]].unique())), results[categorical_cols[1]].unique())
+
+                plt.xlabel(categorical_cols[0])
+                plt.ylabel(categorical_cols[1])
+                plt.title("Gráfico de dispersión categórico")
+            else:
+                plt.text(0.5, 0.5, "No hay suficientes columnas para dispersión", ha="center")
+
+
+        else:  # auto (modo actual)
+            if len(numeric_cols) >= 2:
+                corr = results[numeric_cols].corr()
+                plt.imshow(corr, cmap="coolwarm", aspect="auto")
+                plt.colorbar()
+                plt.title("Mapa de Correlación")
+            elif len(categorical_cols) >= 1:
+                col = categorical_cols[0]
+                vc = results[col].value_counts().head(10)
+                vc.plot(kind="barh")
+                plt.title(f"Frecuencia de {col}")
+            else:
+                plt.text(0.5, 0.5, "No hay datos visualizables", ha="center")
+
+        # ===================================================
         plt.tight_layout()
         buf = io.BytesIO()
         plt.savefig(buf, format="png", bbox_inches="tight")
@@ -210,8 +291,10 @@ def generate_visualization(results: pd.DataFrame, user_input: str) -> str:
         plt.close()
 
         return f'<div style="text-align:center;margin-top:12px;"><img src="data:image/png;base64,{img_base64}" alt="Gráfico generado" style="max-width:100%;border-radius:10px;box-shadow:0 6px 18px rgba(2,6,23,0.08)"></div>'
+
     except Exception as e:
         return f"<p style='color:#f87171;'>⚠️ No se pudo generar el gráfico: {e}</p>"
+
 
 # ===========================
 # 4️⃣ INTERFAZ PRINCIPAL
