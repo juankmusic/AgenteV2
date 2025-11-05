@@ -1,4 +1,5 @@
 # core/ai_core/report_synthesizer.py
+
 import os
 import json
 import pandas as pd
@@ -18,8 +19,6 @@ from markdown import markdown
 # CONFIGURACIÓN
 # ===========================
 load_dotenv()
-#DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-#deepseek_client = OpenAIClient(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com/v1")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai_client = OpenAIClient(api_key=OPENAI_API_KEY)
@@ -42,6 +41,7 @@ GRAPH_TYPE_KEYWORDS = {
     "puntos": "scatter"
 }
 
+# --- MODIFICACIÓN: Esta función ahora solo es una opción de fallback ---
 def _detect_graph_type(user_input: str) -> str:
     """
     Detecta el tipo de gráfico solicitado por el usuario a partir del texto.
@@ -52,6 +52,7 @@ def _detect_graph_type(user_input: str) -> str:
             return gtype
     return "auto"  # por defecto
 
+
 # ===========================
 # UTILIDADES
 # ===========================
@@ -59,6 +60,8 @@ def _user_wants_table(user_input: str) -> bool:
     txt = user_input.lower()
     return any(k in txt for k in TABLE_KEYWORDS)
 
+# Esta función ya no es estrictamente necesaria si se usa la memoria,
+# pero la mantenemos para compatibilidad con solicitudes directas.
 def _user_wants_graph(user_input: str) -> bool:
     txt = user_input.lower()
     return any(k in txt for k in GRAPH_KEYWORDS)
@@ -192,57 +195,73 @@ def generate_table_html(results: pd.DataFrame, user_input: str) -> str:
 # ===========================
 # 2️⃣ OPCIONAL: VISUALIZACIÓN
 # ===========================
-def generate_visualization(results: pd.DataFrame, user_input: str) -> str:
+# 👉 MODIFICACIÓN: Aceptar chart_type de la memoria de sesión
+def generate_visualization(results: pd.DataFrame, user_input: str, chart_type: str = None) -> str:
     """
-    Genera un gráfico basado en la intención del usuario (barras, circular, líneas, etc.).
+    Genera un gráfico basado en la intención del usuario (memoria o detección).
     """
-    if not _user_wants_graph(user_input):
+
+    # Determinar el tipo de gráfico a usar: 1. Memoria/Explicit; 2. Detección por texto; 3. Auto
+    final_chart_type = chart_type if chart_type else _detect_graph_type(user_input)
+
+    # Si no se ha solicitado un gráfico y no hay tipo en memoria, no generar.
+    if not _user_wants_graph(user_input) and not chart_type:
         return ""
+
 
     try:
         if results is None or results.empty:
             return "<p>⚠️ No hay datos para graficar.</p>"
 
-        graph_type = _detect_graph_type(user_input)
         numeric_cols = results.select_dtypes(include=["number"]).columns
         categorical_cols = results.select_dtypes(include=["object", "category"]).columns
 
         plt.figure(figsize=(8, 5))
 
-        # ========== Tipos de gráfico solicitados ==========
-        if graph_type in ["bar", "barh"]:
-            col = categorical_cols[0] if len(categorical_cols) else results.columns[0]
-            val = numeric_cols[0] if len(numeric_cols) else None
-            data = results.groupby(col)[val].sum() if val else results[col].value_counts()
-            data.plot(kind=graph_type)
-            plt.title(f"Gráfico de {graph_type} de {col}")
+        # ========== Tipos de gráfico solicitados (final_chart_type) ==========
+        if final_chart_type in ["bar", "barh"]:
+            # Asumimos la primera categórica es el eje X y la primera numérica es el eje Y
+            col_labels = categorical_cols[0] if len(categorical_cols) else results.columns[0]
+            col_values = numeric_cols[0] if len(numeric_cols) else None
 
-        elif graph_type == "pie":
-            col = categorical_cols[0] if len(categorical_cols) else results.columns[0]
-
-            # Si hay columna de conteo numérico (ej: "cantidad"), usarla; si no, usar value_counts()
-            count_col = None
-            numeric_cols = results.select_dtypes(include=["number"]).columns
-            for ncol in numeric_cols:
-                if ncol.lower() in ["cantidad", "count", "total"]:  # posibles nombres comunes
-                    count_col = ncol
-                    break
-
-            if count_col:
-                sizes = results[count_col]
-                labels = results[col]
+            if col_values:
+                # Caso 1: Consulta ya Agregada (rol, cantidad_usuarios) o dos columnas
+                # Usar las columnas directamente y establecer la categórica como índice para graficar
+                plot_data = results.set_index(col_labels)[col_values]
+                plot_data.plot(kind=final_chart_type)
+                plt.xlabel(col_labels)
+                plt.ylabel(col_values)
             else:
-                vc = results[col].value_counts().head(6)
+                # Caso 2: Contar filas por categoría (datos crudos)
+                results[col_labels].value_counts().head(10).plot(kind=final_chart_type)
+                plt.ylabel("Conteo de registros") # Etiqueta correcta para value_counts
+            
+            plt.title(f"Gráfico de {final_chart_type} de {col_labels}")
+
+        elif final_chart_type == "pie":
+            # Lógica de Detección de Columna de Valores
+            col_labels = categorical_cols[0] if len(categorical_cols) else results.columns[0]
+            col_sizes = numeric_cols[0] if len(numeric_cols) else None
+            
+            if col_sizes:
+                # Caso 1: Consulta ya Agregada (como la tuya: rol, cantidad_usuarios)
+                # Usar las columnas directamente. Esto corrige el 33%, 33%, 33%
+                sizes = results[col_sizes]
+                labels = results[col_labels]
+            else:
+                # Caso 2: DataFrame con datos crudos (se necesita contar)
+                # Usar value_counts, limitado a 6 categorías para no saturar el pie.
+                vc = results[col_labels].value_counts().head(6)
                 labels = vc.index
                 sizes = vc.values
 
             plt.figure(figsize=(6,6))
             plt.pie(sizes, labels=labels, autopct="%1.1f%%", startangle=90)
-            plt.title(f"Distribución de {col}")
+            plt.title(f"Distribución de {col_labels}")
             plt.axis("equal")  # círculo perfecto
 
 
-        elif graph_type == "line":
+        elif final_chart_type == "line":
             if len(numeric_cols) >= 2:
                 results.plot(x=numeric_cols[0], y=numeric_cols[1:], kind="line")
             else:
@@ -250,7 +269,7 @@ def generate_visualization(results: pd.DataFrame, user_input: str) -> str:
                 results[col].plot(kind="line")
             plt.title("Evolución temporal o secuencial")
 
-        elif graph_type == "scatter":
+        elif final_chart_type == "scatter":
             # Permitir scatter incluso si las columnas son categóricas
             if len(categorical_cols) >= 2:
                 x = pd.factorize(results[categorical_cols[0]])[0]
@@ -268,7 +287,7 @@ def generate_visualization(results: pd.DataFrame, user_input: str) -> str:
                 plt.text(0.5, 0.5, "No hay suficientes columnas para dispersión", ha="center")
 
 
-        else:  # auto (modo actual)
+        else:  # auto (modo actual) o tipo no reconocido
             if len(numeric_cols) >= 2:
                 corr = results[numeric_cols].corr()
                 plt.imshow(corr, cmap="coolwarm", aspect="auto")
@@ -299,10 +318,14 @@ def generate_visualization(results: pd.DataFrame, user_input: str) -> str:
 # ===========================
 # 4️⃣ INTERFAZ PRINCIPAL
 # ===========================
-def generate_report(results: pd.DataFrame, user_input: str) -> str:
+# 👉 MODIFICACIÓN: Aceptar chart_type de la memoria de sesión
+def generate_report(results: pd.DataFrame, user_input: str, chart_type: str = None) -> str:
+    
     report_text = synthesize_from_results(results, user_input)
     table_html = generate_table_html(results, user_input)
-    visual_html = generate_visualization(results, user_input)
+    
+    # 🎯 PUNTO CLAVE: Pasar el tipo de gráfico recordado (chart_type) a la visualización
+    visual_html = generate_visualization(results, user_input, chart_type) 
 
     # convertir markdown a HTML con estilo claro
     report_html = markdown(report_text)

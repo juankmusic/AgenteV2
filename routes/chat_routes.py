@@ -138,7 +138,8 @@ def chat_with_bot():
     # --------------------------
     # Llamar modelo DeepSeek
     # --------------------------
-    response_text = deepseek_chat(user_input, context=context_text, history=history)
+    response_text = deepseek_chat(session_id, user_input, context=context_text, history=history)
+
 
     # --------------------------
     # Guardar en BD

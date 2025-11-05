@@ -1,3 +1,4 @@
+# core/ai_core/query_generator.py
 import os
 import re
 import json
@@ -119,9 +120,6 @@ def generate_sql_with_openai(plan: dict, schema: dict, foreign_keys: list) -> di
     - Si el plan menciona una tabla o columna, interpreta el contexto semántico para saber qué tabla y qué columna utilizar.
     - Asegúrate de que la consulta sea **segura** y que no contenga comandos destructivos como `DROP`, `DELETE` sin `WHERE`, o `TRUNCATE`.
     - Genera una consulta que **respete las relaciones y restricciones de la base de datos**.
-    - **NO agregues filtros automáticos a menos que el plan indique explícitamente un valor para el filtro.**
-    - Usa únicamente los nombres de tablas que existen en el esquema proporcionado.
-    - No inventes nombres de tablas aunque existan sinónimos en el plan o el texto.
 
     Recuerda: nunca pidas datos al usuario, la información que necesitas está en la base de datos.
 
@@ -169,14 +167,31 @@ def generate_sql_with_openai(plan: dict, schema: dict, foreign_keys: list) -> di
         return {"sql": None, "descripcion": str(e)}
 
 # ======================================================
-# 4️⃣ FUNCIÓN: INTERFAZ PÚBLICA
+# 4️⃣ FUNCIÓN: INTERFAZ PÚBLICA (MODIFICADA)
 # ======================================================
 def generate_query_from_plan(plan: dict) -> dict:
     """
     Punto de entrada principal.
-    Lee la estructura de la base de datos y genera una consulta SQL
+    Verifica si la acción es 'reutilizar_consulta' para evitar la generación de SQL,
+    luego lee la estructura de la base de datos y genera una consulta SQL
     a partir del plan de acción del agente inteligente.
     """
+    
+    # 🛑 NUEVA LÓGICA: REUTILIZAR CONSULTA
+    if plan.get("accion") == "reutilizar_consulta":
+        previous_sql = plan.get("meta", {}).get("previous_sql")
+        if previous_sql:
+            print(f"🔄 Reutilizando SQL anterior (solicitud de cambio de visualización).")
+            return {
+                "sql": previous_sql,
+                "descripcion": f"Reutilizando consulta para cambiar visualización a {plan.get('meta', {}).get('visualization', 'tabla')}."
+            }
+        else:
+            print("⚠️ Acción 'reutilizar_consulta' detectada, pero sin SQL previo. Volviendo a generación normal.")
+            # Continúa al flujo normal si no hay SQL que reutilizar.
+            
+
+    # Flujo normal de generación (si no se reutiliza)
     schema, foreign_keys = get_database_schema()  # Ahora obtiene también las claves foráneas
     if not schema:
         print("⚠️ No se pudo obtener el esquema de la base de datos.")
@@ -190,4 +205,3 @@ def generate_query_from_plan(plan: dict) -> dict:
         print(f"⚠️ No se pudo generar la consulta SQL.")
 
     return result
-
