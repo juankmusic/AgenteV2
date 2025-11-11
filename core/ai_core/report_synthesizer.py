@@ -124,7 +124,8 @@ def synthesize_from_results(results: pd.DataFrame, user_input: str) -> str:
         header = f"### Informe Analítico Automatizado\n**Fecha de generación:** {today}\n\n"
         return header + analysis
     except Exception as e:
-        return f"<p style='color:#f87171;'>❌ Error generando informe: {e}</p>"
+        # 🛑 Corregido: Usar clase CSS para errores en lugar de estilo en línea fijo
+        return f"<p class='error-message'>❌ Error generando informe: {e}</p>"
 
 def generate_table_html(results: pd.DataFrame, user_input: str) -> str:
     """
@@ -148,49 +149,17 @@ def generate_table_html(results: pd.DataFrame, user_input: str) -> str:
     # Mejorar visualización: transformar NA en vacío
     df_small = df_small.fillna("")
 
-    # Generar CSS simple para tabla
-    style = """
-    <style>
-    .aigr-table {
-    border-collapse: collapse;
-    width: 100%;
-    font-family: 'Segoe UI', sans-serif;
-    margin-top: 12px;
-    color: #e2e8f0; /* texto claro */
-    }
-    .aigr-table th {
-    background: #1e293b;
-    color: #f8fafc;
-    padding: 10px;
-    text-align: left;
-    font-weight: 600;
-    border-bottom: 2px solid #334155;
-    }
-    .aigr-table td {
-    border-bottom: 1px solid #334155;
-    padding: 8px;
-    font-size: 0.95rem;
-    color: #e2e8f0;
-    background-color: #0f172a;
-    }
-    .aigr-table tr:nth-child(even) td {
-    background-color: #1e293b;
-    }
-    .aigr-card {
-    background: #0f172a;
-    border-radius: 10px;
-    padding: 12px;
-    box-shadow: 0 0 8px rgba(255,255,255,0.05);
-    margin-top: 10px;
-    }
-    </style>
-    """
+    # 🛑 Corregido: Se elimina el bloque de estilo completo.
+    # style = """ ... """
 
     html_table = df_small.to_html(classes="aigr-table", index=False, escape=True)
+    # Se usa la clase 'aigr-card' para el div contenedor.
     title = "<div class='aigr-card'><strong>Tabla: datos relevantes (vista limitada)</strong>"
-    footer = "<p style='font-size:0.85rem;color:#6b7280;margin-top:8px;'>Nota: la tabla muestra una vista limitada y columnas sensibles están enmascaradas.</p></div>"
+    # 🛑 Corregido: Se elimina el estilo en línea del footer y se usa la clase 'table-footer'.
+    footer = "<p class='table-footer'>Nota: la tabla muestra una vista limitada y columnas sensibles están enmascaradas.</p></div>"
 
-    return style + title + html_table + footer
+    # 🛑 Corregido: Solo se retorna el contenido (sin 'style' en la concatenación)
+    return title + html_table + footer
 
 # ===========================
 # 2️⃣ OPCIONAL: VISUALIZACIÓN
@@ -216,6 +185,7 @@ def generate_visualization(results: pd.DataFrame, user_input: str, chart_type: s
         numeric_cols = results.select_dtypes(include=["number"]).columns
         categorical_cols = results.select_dtypes(include=["object", "category"]).columns
 
+        # Se asume que el backend matplotlib está configurado para colores neutros o se controlan por CSS si se inyectan como SVG/HTML (aquí es PNG)
         plt.figure(figsize=(8, 5))
 
         # ========== Tipos de gráfico solicitados (final_chart_type) ==========
@@ -309,10 +279,12 @@ def generate_visualization(results: pd.DataFrame, user_input: str, chart_type: s
         img_base64 = base64.b64encode(buf.read()).decode("utf-8")
         plt.close()
 
+        # 🛑 Corregido: Se elimina el estilo en línea de la imagen (excepto para dimensiones y bordes que son fijos)
         return f'<div style="text-align:center;margin-top:12px;"><img src="data:image/png;base64,{img_base64}" alt="Gráfico generado" style="max-width:100%;border-radius:10px;box-shadow:0 6px 18px rgba(2,6,23,0.08)"></div>'
 
     except Exception as e:
-        return f"<p style='color:#f87171;'>⚠️ No se pudo generar el gráfico: {e}</p>"
+        # 🛑 Corregido: Usar clase CSS para errores
+        return f"<p class='error-message'>⚠️ No se pudo generar el gráfico: {e}</p>"
 
 
 # ===========================
@@ -327,7 +299,8 @@ def generate_report(results: pd.DataFrame, user_input: str, chart_type: str = No
     # 🎯 PUNTO CLAVE: Pasar el tipo de gráfico recordado (chart_type) a la visualización
     visual_html = generate_visualization(results, user_input, chart_type) 
 
-    # convertir markdown a HTML con estilo claro
+    # convertir markdown a HTML 
     report_html = markdown(report_text)
 
-    return f"<div style='font-family:Segoe UI, sans-serif;color:#e2e8f0;line-height:1.6;'>{report_html}</div>{table_html}{visual_html}"
+    # 🛑 Corregido: Se elimina el style en línea con color fijo y se usa la clase 'bot-report'
+    return f"<div class='bot-report'>{report_html}</div>{table_html}{visual_html}"
