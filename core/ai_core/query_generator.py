@@ -99,7 +99,12 @@ def generate_sql_with_openai(plan: dict, schema: dict, foreign_keys: list) -> di
     basada en el plan de acción del agente y el esquema real de la base.
     """
     plan_json = json.dumps(plan, ensure_ascii=False, indent=2)
-    schema_json = json.dumps(schema, ensure_ascii=False, indent=2)
+
+    # 🔹 FILTRO: Excluir tablas que no deben usarse
+    TABLES_PROHIBIDAS = ["respuesta"]
+    filtered_schema = {k: v for k, v in schema.items() if k not in TABLES_PROHIBIDAS}
+
+    schema_json = json.dumps(filtered_schema, ensure_ascii=False, indent=2)
     foreign_keys_json = json.dumps(foreign_keys, ensure_ascii=False, indent=2)
 
     prompt = f"""

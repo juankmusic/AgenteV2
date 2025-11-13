@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Agente Inteligente 2025</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
   <style>
@@ -519,13 +520,32 @@ function appendMessage(msg, cls) {
 
     const div = document.createElement("div");
     div.className = "message " + cls;
+    
+    // 1. Inyectar el HTML que incluye el div del gráfico y el script
     div.innerHTML = msg;
 
     wrapper.appendChild(div);
     messagesDiv.appendChild(wrapper);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    
+    // 2. 💡 CRÍTICO: Buscar y ejecutar los scripts inyectados (solo si es un mensaje de bot)
+    if (cls === "bot-msg") {
+        const scripts = div.querySelectorAll("script");
+        scripts.forEach(script => {
+            const newScript = document.createElement('script');
+            // Copiar atributos (como type) y contenido
+            if (script.src) {
+                newScript.src = script.src;
+            } else {
+                newScript.textContent = script.textContent;
+            }
+            
+            // Eliminar el script antiguo y ejecutar el nuevo
+            script.parentNode.removeChild(script); 
+            div.appendChild(newScript);
+        });
+    }
 }
-
 // Botones
 document.getElementById("send-btn").onclick = sendMessage;
 document.getElementById("user-input").addEventListener("keydown", e => { if(e.key==="Enter") sendMessage(); });

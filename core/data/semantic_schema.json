@@ -156,7 +156,15 @@
     "primary_key": [
       "id_dimension"
     ],
-    "foreign_keys": {}
+    "foreign_keys": {},
+    "description": "Catálogo de dimensiones de evaluación o factores de desempeño (ej. Liderazgo, Desarrollo del talento humano). Cada respuesta de los usuarios está asociada a una de estas dimensiones a través de la tabla respuesta_dimension.",
+    "synonyms": [
+      "factor",
+      "área de desempeño",
+      "categoría de evaluación",
+      "dimensión de evaluación"
+    ]
+    
   },
   "dimension_pregunta": {
     "columns": {
@@ -530,7 +538,7 @@
         "references": "pregunta.id"
       }
     },
-    "description": "Respuestas seleccionadas o escritas por los usuarios.",
+    "description": "Respuestas para las preguntas en los formularios del sistema de gestion de desempeño.",
     "synonyms": [
       "contestación",
       "opción",
@@ -562,7 +570,15 @@
       "id_usuario": {
         "references": "usuario.id"
       }
-    }
+    },
+    "description": "Tabla puente que relaciona usuarios, preguntas, respuestas y dimensiones. Permite saber qué usuario respondió qué pregunta y a qué dimensión pertenece esa respuesta.",
+    "synonyms": [
+      "respuestas de usuario",
+      "respuestas dimension",
+      "respuestas por dimensión",
+      "respuestas formulario",
+      "respuestas desempeño"
+    ]
   },
   "resultado_evaluacion": {
     "columns": {
@@ -730,4 +746,5 @@
       }
     }
   }
+  
 }
