@@ -252,14 +252,34 @@ def generate_visualization(results: pd.DataFrame, user_input: str, chart_type: s
 
 
         elif final_chart_type == "line":
-            # Si hay al menos dos numéricas, la primera es X y el resto Ys
-            if len(numeric_cols) >= 2:
-                fig = px.line(results, x=numeric_cols[0], y=numeric_cols[1:])
-            else:
-                # Si solo hay una numérica, usar el índice (secuencia) como X
-                fig = px.line(results, y=numeric_cols[0] if len(numeric_cols) else results.columns[0])
+            fig = go.Figure()
 
-            fig.update_layout(title_text="Evolución temporal o secuencial")
+            # Detectar columnas
+            numeric_cols = results.select_dtypes(include=["number"]).columns
+            x_candidates = results.select_dtypes(include=["datetime", "object", "category"]).columns
+
+            if len(numeric_cols) == 0:
+                fig.add_annotation(
+                    text="No hay columnas numéricas para graficar",
+                    xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False
+                )
+            else:
+                x_col = x_candidates[0] if len(x_candidates) > 0 else results.index
+                y_cols = numeric_cols
+
+                # Graficar cada columna numérica como línea
+                for y in y_cols:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=results[x_col],
+                            y=results[y],
+                            mode='lines+markers',
+                            name=str(y)
+                        )
+                    )
+
+                fig.update_layout(title_text="Gráfico de líneas genérico")
+
 
 
         elif final_chart_type == "scatter":

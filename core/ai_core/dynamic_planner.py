@@ -160,9 +160,16 @@ def plan_actions(intent_data: Dict[str, Any],
     periodo_match = re.search(r"(20\d{2})(?:[-/](20\d{2}))?", texto)
     if periodo_match:
         plan["filtros"]["periodo"] = periodo_match.group(0)
-    equipo_match = re.search(r"equipo\s+([a-zA-Z0-9_\-]+)", texto)
+    # Detectar equipo explícito (versión mejorada)
+    equipo_match = re.search(r"equipo\s*[:=]?\s*['\"]?([a-zA-Z0-9_\-]+)['\"]?", texto)
     if equipo_match:
-        plan["filtros"]["equipo"] = equipo_match.group(1)
+        nombre_equipo = equipo_match.group(1).lower()
+        if nombre_equipo not in ["agrupados", "todos", "completo", "usar", "usando"]:
+            plan["filtros"]["equipo"] = nombre_equipo
+        else:
+            # Si el usuario quiere todos/agrupados, eliminamos el filtro previo
+            plan["filtros"].pop("equipo", None)
+            
     persona = entidades_raw.get("persona") or entidades_raw.get("nombre")
     if persona:
         if isinstance(persona, list):
