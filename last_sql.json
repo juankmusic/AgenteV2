@@ -1,0 +1,1 @@
+{"sql": "SELECT r.nombre AS rol, COUNT(u.id) AS cantidad FROM usuario u JOIN rol r ON u.id_rol = r.id GROUP BY r.nombre ORDER BY cantidad DESC LIMIT 100;"}

@@ -1,16 +1,20 @@
 # core/ai_core/report_synthesizer.py
+
 import os
 import json
 import pandas as pd
-import matplotlib.pyplot as plt
-import io
-import base64
 from datetime import datetime
 from dotenv import load_dotenv
 from openai import OpenAI as OpenAIClient
-import matplotlib
-matplotlib.use("Agg")  # backend sin interfaz gráfica (ideal para servidores)
-import matplotlib.pyplot as plt
+
+from core.exceptions import InvalidVisualizationError
+
+import plotly.express as px
+import plotly.graph_objects as go
+import plotly.io as pio 
+# pio.to_html es clave para incrustar
+# Se eliminan los imports de matplotlib, io, base64.
+# 👆 FIN CAMBIOS PARA PLOTLY
 
 from markdown import markdown 
 
@@ -18,8 +22,6 @@ from markdown import markdown
 # CONFIGURACIÓN
 # ===========================
 load_dotenv()
-#DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY")
-#deepseek_client = OpenAIClient(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com/v1")
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 openai_client = OpenAIClient(api_key=OPENAI_API_KEY)
@@ -42,6 +44,7 @@ GRAPH_TYPE_KEYWORDS = {
     "puntos": "scatter"
 }
 
+# --- MODIFICACIÓN: Esta función ahora solo es una opción de fallback ---
 def _detect_graph_type(user_input: str) -> str:
     """
     Detecta el tipo de gráfico solicitado por el usuario a partir del texto.
@@ -51,6 +54,7 @@ def _detect_graph_type(user_input: str) -> str:
         if key in txt:
             return gtype
     return "auto"  # por defecto
+
 
 # ===========================
 # UTILIDADES
@@ -83,7 +87,6 @@ def _limit_and_stringify(df: pd.DataFrame, max_rows: int = 5) -> pd.DataFrame:
 def synthesize_from_results(results: pd.DataFrame, user_input: str) -> str:
     """
     Analiza los resultados de la consulta y genera un informe narrativo y seguro.
-    No muestra tablas ni datos sensibles.
     """
 
     # Limitar muestra para enviar al LLM
@@ -91,7 +94,7 @@ def synthesize_from_results(results: pd.DataFrame, user_input: str) -> str:
     data_sample = sample.to_dict(orient="records")
     today = datetime.now().strftime("%d/%m/%Y %H:%M")
 
-    # Construir prompt controlado
+    # Construir prompt controlado (omito por brevedad, es el mismo código)
     prompt = f"""
     Eres un analista cognitivo que genera informes concisos y confidenciales.
     Tu tarea es describir los datos sin agregar ejemplos ni suposiciones.
@@ -121,13 +124,11 @@ def synthesize_from_results(results: pd.DataFrame, user_input: str) -> str:
         header = f"### Informe Analítico Automatizado\n**Fecha de generación:** {today}\n\n"
         return header + analysis
     except Exception as e:
-        return f"<p style='color:#f87171;'>❌ Error generando informe: {e}</p>"
+        # 🛑 Corregido: Usar clase CSS para errores en lugar de estilo en línea fijo
+        return f"<p class='error-message'>❌ Error generando informe: {e}</p>"
 
 def generate_table_html(results: pd.DataFrame, user_input: str) -> str:
-    """
-    Genera una tabla HTML solo si el usuario la solicita. 
-    Enmascara columnas sensibles y limita el número de filas/columnas.
-    """
+    # ... (Función sin cambios, enfocada solo en la tabla HTML)
     if not _user_wants_table(user_input):
         return ""
 
@@ -145,166 +146,203 @@ def generate_table_html(results: pd.DataFrame, user_input: str) -> str:
     # Mejorar visualización: transformar NA en vacío
     df_small = df_small.fillna("")
 
-    # Generar CSS simple para tabla
-    style = """
-    <style>
-    .aigr-table {
-    border-collapse: collapse;
-    width: 100%;
-    font-family: 'Segoe UI', sans-serif;
-    margin-top: 12px;
-    color: #e2e8f0; /* texto claro */
-    }
-    .aigr-table th {
-    background: #1e293b;
-    color: #f8fafc;
-    padding: 10px;
-    text-align: left;
-    font-weight: 600;
-    border-bottom: 2px solid #334155;
-    }
-    .aigr-table td {
-    border-bottom: 1px solid #334155;
-    padding: 8px;
-    font-size: 0.95rem;
-    color: #e2e8f0;
-    background-color: #0f172a;
-    }
-    .aigr-table tr:nth-child(even) td {
-    background-color: #1e293b;
-    }
-    .aigr-card {
-    background: #0f172a;
-    border-radius: 10px;
-    padding: 12px;
-    box-shadow: 0 0 8px rgba(255,255,255,0.05);
-    margin-top: 10px;
-    }
-    </style>
-    """
-
     html_table = df_small.to_html(classes="aigr-table", index=False, escape=True)
     title = "<div class='aigr-card'><strong>Tabla: datos relevantes (vista limitada)</strong>"
-    footer = "<p style='font-size:0.85rem;color:#6b7280;margin-top:8px;'>Nota: la tabla muestra una vista limitada y columnas sensibles están enmascaradas.</p></div>"
+    footer = "<p class='table-footer'>Nota: la tabla muestra una vista limitada y columnas sensibles están enmascaradas.</p></div>"
 
-    return style + title + html_table + footer
+    return title + html_table + footer
+
 
 # ===========================
-# 2️⃣ OPCIONAL: VISUALIZACIÓN
+# 2️⃣ OPCIONAL: VISUALIZACIÓN (MIGRACIÓN A PLOTLY)
 # ===========================
-def generate_visualization(results: pd.DataFrame, user_input: str) -> str:
+def generate_visualization(results: pd.DataFrame, user_input: str, chart_type: str = None) -> str:
     """
-    Genera un gráfico basado en la intención del usuario (barras, circular, líneas, etc.).
+    Genera un gráfico interactivo usando Plotly.
+    Lanza InvalidVisualizationError si la lógica del gráfico es inválida.
     """
-    if not _user_wants_graph(user_input):
+    # Determinar el tipo de gráfico a usar
+    final_chart_type = chart_type if chart_type else _detect_graph_type(user_input)
+
+    # Si no se ha solicitado un gráfico y no hay tipo en memoria, no generar.
+    if not _user_wants_graph(user_input) and not chart_type:
         return ""
 
     try:
         if results is None or results.empty:
             return "<p>⚠️ No hay datos para graficar.</p>"
 
-        graph_type = _detect_graph_type(user_input)
         numeric_cols = results.select_dtypes(include=["number"]).columns
         categorical_cols = results.select_dtypes(include=["object", "category"]).columns
+        
+        # 🚀 INICIO VALIDACIÓN LÓGICA DE GRÁFICO (Mejora 2)
+        if final_chart_type in ["bar", "barh", "line", "scatter"] and len(numeric_cols) == 0:
+            raise InvalidVisualizationError(
+                f"No se pudo generar un gráfico de '{final_chart_type}' porque los datos resultantes no contienen columnas numéricas para el eje de valores.",
+                suggested_action="¿Quizás querías un conteo (gráfico de pastel) o una tabla?"
+            )
+        
+        if final_chart_type == "pie" and len(categorical_cols) == 0:
+            raise InvalidVisualizationError(
+                f"No se pudo generar un gráfico de '{final_chart_type}' porque los datos resultantes no contienen columnas categóricas (texto) para agrupar las porciones.",
+                suggested_action="¿Quizás querías un gráfico de barras o una tabla?"
+            )
+        # 🚀 FIN VALIDACIÓN LÓGICA
 
-        plt.figure(figsize=(8, 5))
+        fig = go.Figure()
 
-        # ========== Tipos de gráfico solicitados ==========
-        if graph_type in ["bar", "barh"]:
-            col = categorical_cols[0] if len(categorical_cols) else results.columns[0]
-            val = numeric_cols[0] if len(numeric_cols) else None
-            data = results.groupby(col)[val].sum() if val else results[col].value_counts()
-            data.plot(kind=graph_type)
-            plt.title(f"Gráfico de {graph_type} de {col}")
+        # 🎯 CONFIGURACIÓN DE LAYOUT CLARO FORZADO 💡
+        # Asegura que el texto sea negro y el fondo blanco para legibilidad universal.
+        light_theme_layout = go.Layout(
+            paper_bgcolor='white',      # Fondo blanco para el área externa (donde van títulos)
+            plot_bgcolor='white',       # Fondo blanco para el área de trazado
+            font=dict(
+                color='black'           # Texto general en negro
+            ),
+            xaxis=dict(
+                showgrid=True,
+                gridcolor='rgba(0, 0, 0, 0.1)',
+                linecolor='black',
+                tickfont=dict(color='black'),
+                title_font=dict(color='black')
+            ),
+            yaxis=dict(
+                showgrid=True,
+                gridcolor='rgba(0, 0, 0, 0.1)',
+                linecolor='black',
+                tickfont=dict(color='black'),
+                title_font=dict(color='black')
+            ),
+            title=dict(
+                font=dict(color='black') # Título principal en negro
+            ),
+            legend=dict(
+                font=dict(color='black'),
+                bgcolor='rgba(255, 255, 255, 0.7)'
+            )
+        )
 
-        elif graph_type == "pie":
-            col = categorical_cols[0] if len(categorical_cols) else results.columns[0]
+        # ========== Tipos de gráfico solicitados (final_chart_type) ==========
+        if final_chart_type in ["bar", "barh"]:
+            # Asumimos la primera categórica es el eje X y la primera numérica es el eje Y
+            col_labels = categorical_cols[0] if len(categorical_cols) else results.columns[0]
+            col_values = numeric_cols[0] if len(numeric_cols) else None
+            
+            orientation = 'h' if final_chart_type == 'barh' else 'v'
+            x_col = col_values if orientation == 'h' else col_labels
+            y_col = col_labels if orientation == 'h' else col_values
 
-            # Si hay columna de conteo numérico (ej: "cantidad"), usarla; si no, usar value_counts()
-            count_col = None
-            numeric_cols = results.select_dtypes(include=["number"]).columns
-            for ncol in numeric_cols:
-                if ncol.lower() in ["cantidad", "count", "total"]:  # posibles nombres comunes
-                    count_col = ncol
-                    break
-
-            if count_col:
-                sizes = results[count_col]
-                labels = results[col]
+            if col_values:
+                # Caso 1: Consulta ya Agregada (rol, cantidad_usuarios)
+                fig = px.bar(results, x=x_col, y=y_col, orientation=orientation)
+                title = f"Gráfico de {final_chart_type} de {col_labels} vs {col_values}"
             else:
-                vc = results[col].value_counts().head(6)
-                labels = vc.index
-                sizes = vc.values
+                # Caso 2: Contar filas por categoría (datos crudos)
+                count_data = results[col_labels].value_counts().head(10).reset_index()
+                count_data.columns = ['Etiqueta', 'Conteo']
+                
+                x_count = 'Conteo' if orientation == 'h' else 'Etiqueta'
+                y_count = 'Etiqueta' if orientation == 'h' else 'Conteo'
+                
+                fig = px.bar(count_data, x=x_count, y=y_count, orientation=orientation)
+                title = f"Frecuencia (Conteo) de {col_labels}"
+            
+            fig.update_layout(title_text=title)
 
-            plt.figure(figsize=(6,6))
-            plt.pie(sizes, labels=labels, autopct="%1.1f%%", startangle=90)
-            plt.title(f"Distribución de {col}")
-            plt.axis("equal")  # círculo perfecto
+
+        elif final_chart_type == "pie":
+            col_labels = categorical_cols[0] if len(categorical_cols) else results.columns[0]
+            col_sizes = numeric_cols[0] if len(numeric_cols) else None
+            
+            if col_sizes:
+                # Caso 1: Consulta ya Agregada
+                fig = px.pie(results, values=col_sizes, names=col_labels)
+            else:
+                # Caso 2: DataFrame con datos crudos (se necesita contar)
+                vc = results[col_labels].value_counts().head(6).reset_index()
+                vc.columns = ['Etiqueta', 'Conteo']
+                fig = px.pie(vc, values='Conteo', names='Etiqueta')
+            
+            fig.update_layout(title_text=f"Distribución de {col_labels}")
 
 
-        elif graph_type == "line":
+        elif final_chart_type == "line":
+            # Si hay al menos dos numéricas, la primera es X y el resto Ys
             if len(numeric_cols) >= 2:
-                results.plot(x=numeric_cols[0], y=numeric_cols[1:], kind="line")
+                fig = px.line(results, x=numeric_cols[0], y=numeric_cols[1:])
             else:
-                col = numeric_cols[0] if len(numeric_cols) else results.columns[0]
-                results[col].plot(kind="line")
-            plt.title("Evolución temporal o secuencial")
+                # Si solo hay una numérica, usar el índice (secuencia) como X
+                fig = px.line(results, y=numeric_cols[0] if len(numeric_cols) else results.columns[0])
 
-        elif graph_type == "scatter":
-            # Permitir scatter incluso si las columnas son categóricas
-            if len(categorical_cols) >= 2:
-                x = pd.factorize(results[categorical_cols[0]])[0]
-                y = pd.factorize(results[categorical_cols[1]])[0]
-                plt.scatter(x, y)
+            fig.update_layout(title_text="Evolución temporal o secuencial")
 
-                # Etiquetas de los ticks
-                plt.xticks(range(len(results[categorical_cols[0]].unique())), results[categorical_cols[0]].unique(), rotation=45)
-                plt.yticks(range(len(results[categorical_cols[1]].unique())), results[categorical_cols[1]].unique())
 
-                plt.xlabel(categorical_cols[0])
-                plt.ylabel(categorical_cols[1])
-                plt.title("Gráfico de dispersión categórico")
+        elif final_chart_type == "scatter":
+            # Intentar dispersión con dos columnas (numéricas o categóricas)
+            all_cols = list(results.columns)
+            if len(all_cols) >= 2:
+                x_col, y_col = all_cols[0], all_cols[1]
+                fig = px.scatter(results, x=x_col, y=y_col, title=f"Dispersión de {x_col} vs {y_col}")
             else:
-                plt.text(0.5, 0.5, "No hay suficientes columnas para dispersión", ha="center")
+                fig.add_annotation(text="No hay suficientes columnas para dispersión", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
 
-
-        else:  # auto (modo actual)
+        else:  # auto (modo actual) o tipo no reconocido
             if len(numeric_cols) >= 2:
-                corr = results[numeric_cols].corr()
-                plt.imshow(corr, cmap="coolwarm", aspect="auto")
-                plt.colorbar()
-                plt.title("Mapa de Correlación")
+                # Usar Mapa de Calor (heatmap) para correlación
+                corr = results[numeric_cols].corr().reset_index()
+                corr_melted = corr.melt(id_vars='index', var_name='Variable_2', value_name='Correlacion')
+                fig = px.density_heatmap(corr_melted, x='index', y='Variable_2', z='Correlacion', 
+                                        color_continuous_scale='RdBu', title="Mapa de Correlación Numérica")
             elif len(categorical_cols) >= 1:
+                # Por defecto, si hay datos categóricos, mostrar un gráfico de barras horizontales de frecuencia
                 col = categorical_cols[0]
-                vc = results[col].value_counts().head(10)
-                vc.plot(kind="barh")
-                plt.title(f"Frecuencia de {col}")
+                vc = results[col].value_counts().head(10).reset_index()
+                vc.columns = [col, 'Conteo']
+                fig = px.bar(vc, x='Conteo', y=col, orientation='h', title=f"Frecuencia de {col}")
             else:
-                plt.text(0.5, 0.5, "No hay datos visualizables", ha="center")
+             # Fallback si el tipo no está implementado
+             fig.add_annotation(text="Tipo de gráfico no reconocido", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
 
-        # ===================================================
-        plt.tight_layout()
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png", bbox_inches="tight")
-        buf.seek(0)
-        img_base64 = base64.b64encode(buf.read()).decode("utf-8")
-        plt.close()
+        # Aplicar el layout CLARO forzado (código original)
+        light_theme_layout = go.Layout(paper_bgcolor='white', plot_bgcolor='white', font=dict(color='black')) # Layout simplificado
+        fig.update_layout(light_theme_layout)
+        fig.update_layout(margin=dict(l=20, r=20, t=50, b=20))
+        
+        plot_html = pio.to_html(fig, full_html=False, include_plotlyjs='cdn', default_height='100%', default_width='100%')
+        return f'<div class="aigr-card aigr-plotly-container" style="padding: 10px 0;"><strong>Visualización Interactiva</strong>{plot_html}</div>'
 
-        return f'<div style="text-align:center;margin-top:12px;"><img src="data:image/png;base64,{img_base64}" alt="Gráfico generado" style="max-width:100%;border-radius:10px;box-shadow:0 6px 18px rgba(2,6,23,0.08)"></div>'
 
     except Exception as e:
-        return f"<p style='color:#f87171;'>⚠️ No se pudo generar el gráfico: {e}</p>"
+        # Si es nuestra excepción personalizada, la relanzamos para que la capture chat_logic
+        if isinstance(e, InvalidVisualizationError):
+            raise e 
+        # Si es un error genérico de Plotly, lo envolvemos
+        print(f"Error interno de Plotly: {e}")
+        return f"<p class='error-message'>⚠️ No se pudo generar el gráfico: {e}</p>"
 
 
 # ===========================
 # 4️⃣ INTERFAZ PRINCIPAL
 # ===========================
-def generate_report(results: pd.DataFrame, user_input: str) -> str:
+def generate_report(results: pd.DataFrame, user_input: str, chart_type: str = None, force_text_only: bool = False) -> str:
+    """
+    Genera el informe completo.
+    'force_text_only' se añade para el manejo de errores: 
+    si el gráfico falla, podemos llamar a esta función de nuevo 
+    para obtener solo el texto.
+    """
+    
     report_text = synthesize_from_results(results, user_input)
     table_html = generate_table_html(results, user_input)
-    visual_html = generate_visualization(results, user_input)
+    
+    visual_html = ""
+    # Solo intentamos generar el gráfico si NO forzamos solo texto
+    if not force_text_only:
+        # Esta es la función que puede lanzar InvalidVisualizationError
+        visual_html = generate_visualization(results, user_input, chart_type) 
 
-    # convertir markdown a HTML con estilo claro
+    # convertir markdown a HTML 
     report_html = markdown(report_text)
 
-    return f"<div style='font-family:Segoe UI, sans-serif;color:#e2e8f0;line-height:1.6;'>{report_html}</div>{table_html}{visual_html}"
+    # Devolver el informe narrativo, la tabla (si se solicita) y el gráfico interactivo
+    return f"<div class='bot-report'>{report_html}</div>{table_html}{visual_html}"

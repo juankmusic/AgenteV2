@@ -365,3 +365,78 @@ def find_related_table(user_query: str, top_k: int = 3, similarity_threshold: fl
     except Exception as e:
         logger.exception("Error en find_related_table: %s", e)
         return results
+    
+# core/ai_core/nlp_embeddings.py (Añadir al final del archivo)
+
+# ------------------------------
+# Persistencia del Plan de Conversación
+# ------------------------------
+
+def store_action_plan(session_id: str, plan_data: Dict[str, Any], executed_sql: Optional[str] = None) -> bool:
+    """
+    Guarda el plan de acción de la IA y el SQL ejecutado como un registro.
+    """
+    conn = None
+    cur = None
+    try:
+        # Añadir el SQL al plan de datos
+        plan_data['executed_sql'] = executed_sql # <--- NUEVA LÍNEA
+
+        # Serializar el plan a string (JSON)
+        plan_json_str = json.dumps(plan_data, ensure_ascii=False)
+        
+        # Usamos el session_id como identificador principal
+        chunk_hash = hashlib.sha256(f"{session_id}-{len(plan_json_str)}-{os.urandom(4).hex()}".encode("utf-8")).hexdigest()
+
+        conn = connect_db()
+        # ... (conexión a DB y cur.execute idénticos) ...
+        # (Asegúrate de que la inserción de abajo use el plan_json_str actualizado)
+        cur = conn.cursor()
+
+        cur.execute("""
+            INSERT INTO document_embeddings (id, text_chunk, source_filename, page_number, chunk_hash, embedding)
+            VALUES (%s, %s, %s, %s, %s, NULL)
+        """, (str(uuid.uuid4()), plan_json_str, f"chat_plan_{session_id}", 0, chunk_hash))
+
+        conn.commit()
+        logger.debug("Plan de acción y SQL guardados para sesión %s", session_id)
+        return True
+    except Exception as e:
+        logger.exception("Error guardando plan de acción: %s", e)
+        # ... (manejo de error) ...
+    finally:
+        _safe_close_cursor_conn(cur, conn)
+
+def get_last_action_plan(session_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Recupera el último plan de acción guardado para la sesión.
+    """
+    conn = None
+    cur = None
+    try:
+        conn = connect_db()
+        if not conn:
+            logger.error("get_last_action_plan: no se pudo conectar a DB.")
+            return None
+        cur = conn.cursor()
+
+        # Buscar el plan más reciente para este session_id
+        sql = """
+            SELECT text_chunk
+            FROM document_embeddings
+            WHERE source_filename = %s
+            ORDER BY id DESC -- Asume que id (uuid) tiene un orden secuencial (o usar timestamp si existe)
+            LIMIT 1
+        """
+        cur.execute(sql, (f"chat_plan_{session_id}",))
+
+        row = cur.fetchone()
+        if row:
+            plan_json_str = row[0]
+            return json.loads(plan_json_str)
+        return None
+    except Exception as e:
+        logger.exception("Error recuperando plan de acción: %s", e)
+        return None
+    finally:
+        _safe_close_cursor_conn(cur, conn)

@@ -1,13 +1,14 @@
 # core/scripts/generate_semantic_schema.py
 """
 Genera un archivo JSON con el esquema semántico enriquecido de la base de datos PostgreSQL.
-Usa la conexión definida en db/connection.py y las variables del archivo .env.
+Incluye una estructura de keywords y descripción para cada tabla y columna.
 """
 
 import os
 import json
 import sys
 from psycopg2.extras import RealDictCursor
+from typing import Dict, Any, List
 
 # Agregamos el path raíz del proyecto para poder importar db.connection
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
@@ -34,6 +35,7 @@ def get_database_schema():
         SELECT table_name
         FROM information_schema.tables
         WHERE table_schema = 'public'
+        AND table_name NOT LIKE 'pg_%' AND table_name NOT LIKE 'sql_%'
         ORDER BY table_name;
     """)
     tables = [r["table_name"] for r in cursor.fetchall()]
@@ -46,9 +48,33 @@ def get_database_schema():
             WHERE table_name = %s
             ORDER BY ordinal_position;
         """, (table,))
-        columns = {r["column_name"]: r["data_type"] for r in cursor.fetchall()}
-
-        # 3️⃣ Claves primarias
+        
+        # Mapear a formato semántico de columna
+        columns: Dict[str, Dict[str, str | List[str]]] = {}
+        for r in cursor.fetchall():
+            col_name = r["column_name"]
+            data_type = r["data_type"]
+            
+            # --- Enriquecimiento automático de columnas (NUEVO) ---
+            keywords = [col_name]
+            description = f"Columna de tipo {data_type}."
+            
+            if "nombre" in col_name:
+                keywords.extend(["nombre", "título", "identificador"])
+                description = "Contiene el nombre o título de la entidad."
+            elif "valor_respuesta" in col_name or "puntaje" in col_name:
+                keywords.extend(["puntaje", "score", "valor", "métrica", "resultado"])
+                description = "El valor numérico o puntaje principal."
+            elif "id" in col_name:
+                keywords.append("id")
+            
+            columns[col_name] = {
+                "type": data_type,
+                "description": description,
+                "keywords": keywords
+            }
+        
+        # 3️⃣ Claves primarias (Guardadas para referencia, no semántica)
         cursor.execute("""
             SELECT kcu.column_name
             FROM information_schema.table_constraints tc
@@ -58,7 +84,7 @@ def get_database_schema():
         """, (table,))
         pk = [r["column_name"] for r in cursor.fetchall()]
 
-        # 4️⃣ Claves foráneas
+        # 4️⃣ Claves foráneas (Guardadas para referencia, no semántica)
         cursor.execute("""
             SELECT
                 kcu.column_name,
@@ -92,54 +118,42 @@ def get_database_schema():
 
 
 # ============================================================
-# FUNCIÓN: ENRIQUECER EL ESQUEMA CON SEMÁNTICA
+# FUNCIÓN: ENRIQUECER EL ESQUEMA CON SEMÁNTICA (Keywords de alto nivel)
 # ============================================================
 
-def enrich_semantic_info(schema):
-    """Agrega descripciones y sinónimos a las tablas clave."""
-    enrichment = {
+def enrich_semantic_info(schema: Dict[str, Any]) -> Dict[str, Any]:
+    """Agrega descripciones y keywords de alto nivel a las tablas clave."""
+    # Lista de sinónimos para tablas clave que el Agente usará para mapeo.
+    table_enrichment = {
         "usuario": {
             "description": "Contiene los datos personales, credenciales y rol de los colaboradores o empleados.",
-            "synonyms": ["colaborador", "empleado", "persona", "trabajador", "user"]
-        },
-        "cursos": {
-            "description": "Registra los cursos de formación disponibles en la plataforma, con sus fechas y categorías.",
-            "synonyms": ["curso", "formación", "capacitación", "entrenamiento", "learning"]
+            "keywords": ["colaborador", "empleado", "persona", "trabajador", "user", "usuarios"]
         },
         "evaluacion": {
             "description": "Guarda las evaluaciones de desempeño o retroalimentaciones hechas a los usuarios.",
-            "synonyms": ["desempeño", "valoración", "feedback", "revisión"]
+            "keywords": ["desempeño", "valoración", "feedback", "revisión", "evaluacion", "evaluaciones"]
         },
-        "progreso_usuario": {
-            "description": "Registra el avance y progreso de cada usuario en los cursos asignados.",
-            "synonyms": ["progreso", "avance", "seguimiento", "tracking"]
-        },
-        "proyecto": {
-            "description": "Información de proyectos o iniciativas desarrolladas por los usuarios.",
-            "synonyms": ["plan", "actividad", "iniciativa"]
-        },
-        "indicador": {
-            "description": "Contiene métricas o KPIs asociados a desempeño o proyectos.",
-            "synonyms": ["kpi", "métrica", "indicador de desempeño"]
-        },
-        "pregunta": {
-            "description": "Preguntas que forman parte de encuestas, evaluaciones o formularios.",
-            "synonyms": ["ítem", "reactivo", "pregunta de encuesta"]
+        "equipo": {
+            "description": "Grupos, departamentos o áreas de la empresa.",
+            "keywords": ["equipo", "departamento", "área", "grupo", "unidad", "facultad"]
         },
         "respuesta": {
             "description": "Respuestas seleccionadas o escritas por los usuarios.",
-            "synonyms": ["contestación", "opción", "resultado"]
-        },
-        "categoria": {
-            "description": "Define categorías o grupos para clasificar cursos, recursos u otros elementos.",
-            "synonyms": ["grupo", "tipo", "clase"]
+            "keywords": ["respuesta", "contestación", "opción", "resultado"]
         }
+        # Puedes añadir más tablas aquí si lo necesitas
     }
 
-    for table, data in enrichment.items():
+    for table, data in table_enrichment.items():
         if table in schema:
+            # Añadir descripción y keywords de alto nivel
             schema[table]["description"] = data["description"]
-            schema[table]["synonyms"] = data["synonyms"]
+            # Usar la clave 'keywords' en lugar de 'synonyms' para uniformidad con las columnas
+            schema[table]["keywords"] = data["keywords"]
+            
+            # Asegurar que 'keywords' exista en la tabla para la lógica del planificador
+            if 'keywords' not in schema[table]:
+                 schema[table]['keywords'] = []
 
     return schema
 
@@ -155,16 +169,24 @@ def main():
     print("✨ Enriqueciendo con información semántica...")
     enriched_schema = enrich_semantic_info(schema)
 
+    # 🛑 PASO CRÍTICO: Envolver el esquema enriquecido en la clave 'tables'
+    final_output = {
+        "tables": enriched_schema
+    }
+
     # Guardar JSON
     output_dir = os.path.join(BASE_DIR, "core", "data")
     os.makedirs(output_dir, exist_ok=True)
     output_path = os.path.join(output_dir, "semantic_schema.json")
 
     with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(enriched_schema, f, indent=2, ensure_ascii=False)
+        json.dump(final_output, f, indent=2, ensure_ascii=False)
 
     print(f"✅ Archivo generado correctamente en: {output_path}")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except ConnectionError as e:
+        print(f"Error al iniciar el generador de esquema: {e}")

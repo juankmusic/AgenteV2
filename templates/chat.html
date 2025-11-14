@@ -4,16 +4,38 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Agente Inteligente 2025</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
   <style>
     :root {
-      --primary: #0ea5e9;
-      --secondary: #10b981;
-      --bg: #0f172a;
+      --primary: #ff6b35;
+      --primary-hover: #ff8c42;
+      --secondary: #f97316;
+      --bg: #0a0a0a;
       --card: rgba(255, 255, 255, 0.05);
-      --text: #e2e8f0;
+      --text: #f5f5f5;
       --border: rgba(255, 255, 255, 0.1);
+      --sidebar-bg: rgba(255, 255, 255, 0.03);
+      --messages-bg: #1a1a1a;
+      --input-bg: #1e1e1e;
+      --bot-msg-bg: #2a2a2a;
+      --bot-msg-text: #f1f5f9;
+    }
+
+    [data-theme="light"] {
+      --primary: #ff6b35;
+      --primary-hover: #e55a2b;
+      --secondary: #f97316;
+      --bg: #ffffff;
+      --card: rgba(0, 0, 0, 0.05);
+      --text: #1a1a1a;
+      --border: rgba(0, 0, 0, 0.1);
+      --sidebar-bg: rgba(0, 0, 0, 0.03);
+      --messages-bg: #f5f5f5;
+      --input-bg: #ffffff;
+      --bot-msg-bg: #e5e5e5;
+      --bot-msg-text: #1a1a1a;
     }
 
     * {
@@ -27,25 +49,62 @@
       color: var(--text);
       display: flex;
       height: 100vh;
+      transition: background 0.3s ease, color 0.3s ease;
     }
 
     /* Sidebar */
     #sidebar {
       width: 280px;
-      background: rgba(255, 255, 255, 0.03);
+      background: var(--sidebar-bg);
       backdrop-filter: blur(12px);
       border-right: 1px solid var(--border);
       display: flex;
       flex-direction: column;
       padding: 20px;
       overflow-y: auto;
+      transition: background 0.3s ease;
+    }
+
+    #sidebar-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
     }
 
     #sidebar h2 {
       font-size: 1.4rem;
-      text-align: center;
-      margin-bottom: 20px;
       font-weight: 600;
+      margin: 0;
+    }
+
+    /* Toggle Switch */
+    .theme-toggle {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.3s ease;
+    }
+
+    .theme-toggle:hover {
+      border-color: var(--primary);
+    }
+
+    .theme-toggle .material-icons {
+      font-size: 20px;
+      padding: 4px;
+      border-radius: 50%;
+      transition: all 0.3s ease;
+    }
+
+    .theme-toggle .active {
+      background: var(--primary);
+      color: white;
     }
 
     .session {
@@ -54,12 +113,15 @@
       margin: 8px 0;
       border-radius: 12px;
       cursor: pointer;
-      transition: background 0.3s ease;
+      transition: all 0.3s ease;
+      border: 1px solid transparent;
     }
 
     .session:hover {
-      background: var(--secondary);
-      color: #fff;
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+      transform: translateX(4px);
     }
 
     #new-session-btn {
@@ -70,11 +132,14 @@
       border-radius: 12px;
       cursor: pointer;
       font-weight: 600;
-      transition: background 0.3s ease;
+      transition: all 0.3s ease;
+      margin-top: auto;
     }
 
     #new-session-btn:hover {
-      background: #0284c7;
+      background: var(--primary-hover);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3);
     }
 
     /* Chat container */
@@ -88,7 +153,8 @@
       flex: 1;
       padding: 30px 20px;
       overflow-y: auto;
-      background: #1e293b;
+      background: var(--messages-bg);
+      transition: background 0.3s ease;
     }
 
     .message-wrapper {
@@ -115,29 +181,98 @@
       border: 1px solid var(--border);
       white-space: pre-wrap;
       word-wrap: break-word;
+      transition: all 0.3s ease;
     }
 
     .user-msg {
       background: var(--primary);
       color: white;
       border-bottom-left-radius: 0;
+      border: none;
+      box-shadow: 0 2px 8px rgba(255, 107, 53, 0.2);
     }
 
     .bot-msg {
-      background: #334155;
-      color: #f1f5f9;
+      background: var(--bot-msg-bg);
+      color: var(--bot-msg-text);
       border-bottom-right-radius: 0;
-      overflow-x: auto; /* para tablas anchas */
+      overflow-x: auto;
+    }
+    /* HTML <style> - ESTILOS QUE USAN VARIABLES DE TEMA */
+
+    /* Estilo para el contenedor general del informe */
+    .bot-report {
+      font-family: 'Segoe UI', sans-serif; 
+      line-height: 1.6;
+      color: var(--bot-msg-text); /* El texto del informe usa el color dinámico */
     }
 
+    /* Estilos de encabezados (generados por Markdown) */
+    .bot-report h1,
+    .bot-report h2,
+    .bot-report h3,
+    .bot-report h4,
+    .bot-report p,
+    .bot-report li {
+        color: var(--bot-msg-text); /* Asegura que todos los elementos hereden el color correcto */
+    }
+
+    /* Estilo para el contenedor general de la tabla (el div 'aigr-card') */
+    .aigr-card {
+      background: var(--bot-msg-bg);
+      border-radius: 10px;
+      padding: 12px;
+      box-shadow: 0 0 8px var(--card); 
+      margin-top: 10px;
+      color: var(--bot-msg-text); /* Título de la tabla */
+    }
+
+    /* Estilos de la tabla en sí (elemento <table>) */
+    .aigr-table {
+      border-collapse: collapse;
+      width: 100%;
+      font-family: 'Segoe UI', sans-serif;
+      margin-top: 12px;
+      color: var(--bot-msg-text); 
+    }
+
+    .aigr-table th {
+      background: var(--sidebar-bg); /* Fondo del encabezado */
+      color: var(--primary); /* Texto del encabezado en color principal */
+      padding: 10px;
+      text-align: left;
+      font-weight: 600;
+      border-bottom: 2px solid var(--border);
+    }
+
+    .aigr-table td {
+      border-bottom: 1px solid var(--border);
+      padding: 8px;
+      font-size: 0.95rem;
+      color: var(--bot-msg-text); /* Texto de las celdas */
+      background-color: var(--messages-bg); /* Fondo de la celda */
+    }
+
+    /* Filas pares con ligero contraste */
+    .aigr-table tr:nth-child(even) td {
+      background-color: var(--bot-msg-bg); 
+    }
+
+    /* Estilo para el pie de nota de la tabla (reemplaza el style en línea) */
+    .table-footer,
+    .error-message { 
+        font-size: 0.85rem;
+        color: var(--border); /* Un color sutil */
+        margin-top: 8px;
+    }
     .bot-msg table, 
     .bot-msg th, 
     .bot-msg td {
-      color: #f1f5f9 !important;  /* texto legible */
+      color: var(--bot-msg-text) !important;
     }
 
     .bot-msg strong {
-      color: #38bdf8; /* títulos más visibles */
+      color: var(--primary);
     }
 
     /* Input area */
@@ -145,19 +280,26 @@
       display: flex;
       align-items: center;
       padding: 16px 20px;
-      background: #0f172a;
+      background: var(--bg);
       border-top: 1px solid var(--border);
+      transition: background 0.3s ease;
     }
 
     #user-input {
       flex: 1;
       padding: 14px 16px;
       border-radius: 12px;
-      border: none;
+      border: 1px solid var(--border);
       font-size: 1rem;
       outline: none;
-      background: #1e293b;
-      color: white;
+      background: var(--input-bg);
+      color: var(--text);
+      transition: all 0.3s ease;
+    }
+
+    #user-input:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(255, 107, 53, 0.1);
     }
 
     .chat-btn {
@@ -167,16 +309,19 @@
       padding: 10px;
       border-radius: 10px;
       cursor: pointer;
-      color: white;
+      color: var(--text);
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: 0.2s;
+      transition: all 0.3s ease;
     }
 
     .chat-btn:hover {
-      background: var(--secondary);
-      border-color: transparent;
+      background: var(--primary);
+      border-color: var(--primary);
+      color: white;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(255, 107, 53, 0.2);
     }
 
     .material-icons {
@@ -193,8 +338,12 @@
     }
 
     ::-webkit-scrollbar-thumb {
-      background: #64748b;
+      background: var(--primary);
       border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--primary-hover);
     }
 
     @media (max-width: 768px) {
@@ -222,7 +371,13 @@
 
 <!-- Sidebar -->
 <div id="sidebar">
-  <h2>💬 Sesiones</h2>
+  <div id="sidebar-header">
+    <h2>💬 Sesiones</h2>
+    <div class="theme-toggle" id="theme-toggle">
+      <span class="material-icons" id="light-icon">light_mode</span>
+      <span class="material-icons active" id="dark-icon">dark_mode</span>
+    </div>
+  </div>
   <div id="sessions"></div>
   <button id="new-session-btn">+ Nueva sesión</button>
   <input type="file" id="file-input" />
@@ -247,7 +402,36 @@
 
 <script>
 let currentSessionId = null;
-let currentFile = null; // Para mantener el archivo asociado a la sesión
+let currentFile = null;
+
+// Theme Toggle
+const themeToggle = document.getElementById('theme-toggle');
+const lightIcon = document.getElementById('light-icon');
+const darkIcon = document.getElementById('dark-icon');
+const html = document.documentElement;
+
+// Cargar tema guardado
+const savedTheme = localStorage.getItem('theme') || 'dark';
+html.setAttribute('data-theme', savedTheme);
+updateThemeIcons(savedTheme);
+
+themeToggle.addEventListener('click', () => {
+  const currentTheme = html.getAttribute('data-theme');
+  const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', newTheme);
+  localStorage.setItem('theme', newTheme);
+  updateThemeIcons(newTheme);
+});
+
+function updateThemeIcons(theme) {
+  if (theme === 'dark') {
+    lightIcon.classList.remove('active');
+    darkIcon.classList.add('active');
+  } else {
+    darkIcon.classList.remove('active');
+    lightIcon.classList.add('active');
+  }
+}
 
 // Cargar sesiones anteriores
 function loadSessions() {
@@ -269,7 +453,6 @@ function loadSessions() {
 // Seleccionar sesión
 function selectSession(sessionId) {
     currentSessionId = sessionId;
-    // Pedimos también cuál es el archivo activo si existe
     fetch(`/history?session_id=${currentSessionId}`)
         .then(res => res.json())
         .then(data => {
@@ -281,7 +464,6 @@ function selectSession(sessionId) {
             messagesDiv.scrollTop = messagesDiv.scrollHeight;
         });
 
-    // Recuperar archivo asociado (si lo quieres mantener)
     fetch(`/get_active_file?session_id=${currentSessionId}`)
         .then(res => res.json())
         .then(data => {
@@ -318,13 +500,12 @@ function sendMessage() {
         body: JSON.stringify({
             message: text,
             session_id: currentSessionId,
-            uploaded_file: currentFile // enviamos el archivo asociado
+            uploaded_file: currentFile
         })
     })
     .then(res => res.json())
     .then(data => {
         appendMessage(data.response, 'bot-msg');
-        // Mantener la sesión y archivo actual
         currentSessionId = data.session_id;
         currentFile = data.source_file || currentFile;
     });
@@ -339,14 +520,32 @@ function appendMessage(msg, cls) {
 
     const div = document.createElement("div");
     div.className = "message " + cls;
+    
+    // 1. Inyectar el HTML que incluye el div del gráfico y el script
     div.innerHTML = msg;
 
     wrapper.appendChild(div);
     messagesDiv.appendChild(wrapper);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    
+    // 2. 💡 CRÍTICO: Buscar y ejecutar los scripts inyectados (solo si es un mensaje de bot)
+    if (cls === "bot-msg") {
+        const scripts = div.querySelectorAll("script");
+        scripts.forEach(script => {
+            const newScript = document.createElement('script');
+            // Copiar atributos (como type) y contenido
+            if (script.src) {
+                newScript.src = script.src;
+            } else {
+                newScript.textContent = script.textContent;
+            }
+            
+            // Eliminar el script antiguo y ejecutar el nuevo
+            script.parentNode.removeChild(script); 
+            div.appendChild(newScript);
+        });
+    }
 }
-
-
 // Botones
 document.getElementById("send-btn").onclick = sendMessage;
 document.getElementById("user-input").addEventListener("keydown", e => { if(e.key==="Enter") sendMessage(); });
@@ -360,21 +559,18 @@ document.getElementById("file-input").addEventListener("change", function() {
         .then(res => res.json())
         .then(data => {
             alert(data.message);
-            currentFile = file.name; // Guardar el archivo en la sesión actual
+            currentFile = file.name;
         });
 });
 
 // VOZ
-
 let mediaRecorder;
 let audioChunks = [];
 
-// Botón de voz
 const voiceBtn = document.getElementById("voice-btn");
 
 voiceBtn.onclick = async () => {
     if (!mediaRecorder || mediaRecorder.state === "inactive") {
-        // Solicitar acceso al micrófono
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
         mediaRecorder = new MediaRecorder(stream);
 
@@ -393,9 +589,8 @@ voiceBtn.onclick = async () => {
                     alert("❌ Error transcripción: " + data.error);
                 } else {
                     const transcription = data.transcription;
-                    appendMessage(transcription, "user-msg"); // muestra en pantalla
+                    appendMessage(transcription, "user-msg");
 
-                    // Enviar transcripción como mensaje normal al bot
                     fetch("/chat", {
                         method: "POST",
                         headers: { 'Content-Type': 'application/json' },
@@ -408,7 +603,6 @@ voiceBtn.onclick = async () => {
                     .then(chatData => {
                         appendMessage(chatData.response, "bot-msg");
                     });
-
                 }
             } catch (err) {
                 console.error(err);
@@ -416,15 +610,13 @@ voiceBtn.onclick = async () => {
             }
         };
 
-
         mediaRecorder.start();
-        voiceBtn.innerText = "⏹ Detener";
+        voiceBtn.innerHTML = '<span class="material-icons">stop</span>';
     } else if (mediaRecorder.state === "recording") {
         mediaRecorder.stop();
-        voiceBtn.innerText = "🎤";
+        voiceBtn.innerHTML = '<span class="material-icons">mic</span>';
     }
 };
-
 
 // Nueva sesión
 document.getElementById("new-session-btn").onclick = () => {
