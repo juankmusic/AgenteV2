@@ -1,152 +1,31 @@
+# core/ai_core/dynamic_planner.py
 import json
 import re
 import logging
 from typing import Dict, Any, List, Optional
-import numpy as np
-
-# 👇 Importar la excepción de error lógico
-from core.exceptions import LogicalError 
-# 👇 Importar las herramientas semánticas que necesitamos
-from core.ai_core.nlp_embeddings import generate_embedding
 
 logger = logging.getLogger(__name__)
 if not logger.handlers:
     logging.basicConfig(level="INFO")
 
-# ======================================================
-# 1. FUNCIONES AUXILIARES SEMÁNTICAS (EL NUEVO CEREBRO)
-# ======================================================
 
-def _cosine_similarity(vec1: List[float], vec2: List[float]) -> float:
-    """
-    Calcula la similitud coseno entre dos vectores (listas de floats).
-    """
-    try:
-        if vec1 is None or vec2 is None:
-            return 0.0
-        
-        v1 = np.array(vec1, dtype=float)
-        v2 = np.array(vec2, dtype=float)
-        
-        norm1 = np.linalg.norm(v1)
-        norm2 = np.linalg.norm(v2)
-        
-        if norm1 == 0 or norm2 == 0:
-            return 0.0
-            
-        return float(np.dot(v1, v2) / (norm1 * norm2))
-    except Exception as e:
-        logger.error(f"Error en cosine_similarity: {e}")
-        return 0.0
-
-def _find_semantic_match(term: str, 
-                         schema_embeddings: Dict[str, Any], 
-                         entity_type: str = "any", # "table", "column", o "any"
-                         threshold: float = 0.75) -> Optional[Dict[str, Any]]:
-    """
-    Toma un término (ej. "facultad"), genera su embedding, y lo compara
-    con todos los embeddings del esquema para encontrar la mejor coincidencia.
-    """
-    if not term:
-        return None
-        
-    term_embedding = generate_embedding(term)
-    if not term_embedding:
-        logger.warning(f"No se pudo generar embedding para el término: {term}")
-        return None
-        
-    best_match = None
-    best_score = 0.0
-    
-    for key, data in schema_embeddings.items():
-        # Filtrar por tipo si se especifica
-        if entity_type != "any" and data.get("type") != entity_type:
-            continue
-            
-        schema_embed = data.get("embedding")
-        if not schema_embed:
-            continue
-            
-        score = _cosine_similarity(term_embedding, schema_embed)
-        
-        if score > best_score and score >= threshold:
-            best_score = score
-            best_match = {
-                "key": key, # ej. "equipo.nombre" o "evaluacion"
-                "type": data.get("type"),
-                "score": score
-            }
-            
-    return best_match
-
-def _extract_concepts(text: str) -> Dict[str, Optional[str]]:
-    """
-    Extrae los conceptos clave de la consulta del usuario para el mapeo semántico.
-    """
-    text_lower = text.lower()
-    
-    # 1. Detectar Operación
-    operation = None
-    if any(w in text_lower for w in ["promedio", "media", "avg", "mean"]):
-        operation = "avg"
-    elif any(w in text_lower for w in ["suma", "total", "sum"]):
-        operation = "sum"
-    elif any(w in text_lower for w in ["contar", "cantidad", "numero", "cuantos", "count"]):
-        operation = "count"
-        
-    # 2. Detectar Métrica (lo que se está midiendo)
-    metric_term = None
-    metric_match = re.search(r"(?:promedio|suma|media|total)\s+(?:de|del|de los)\s+([a-zA-Z0-9_]+)", text_lower)
-    if metric_match:
-        metric_term = metric_match.group(1)
-    elif "puntaje" in text_lower or "score" in text_lower:
-        metric_term = "puntaje" # Fallback común
-
-    # 3. Detectar Agrupador (el "por ...")
-    group_by_term = None
-    group_by_match = re.search(r"por\s+([a-zA-Z0-9_]+)", text_lower)
-    if group_by_match:
-        group_by_term = group_by_match.group(1)
-
-    # 4. Detectar Tabla Principal (por palabras clave comunes)
-    # (El mapeo semántico de tabla completa es más complejo, usamos heurística)
-    main_table_term = None
-    if "evaluacion" in text_lower or "evaluaciones" in text_lower:
-        main_table_term = "evaluacion"
-    elif "usuario" in text_lower or "usuarios" in text_lower:
-        main_table_term = "usuario"
-    elif "respuesta" in text_lower or "respuestas" in text_lower:
-        main_table_term = "respuesta"
-
-    return {
-        "operation": operation,
-        "metric_term": metric_term,
-        "group_by_term": group_by_term,
-        "main_table_term": main_table_term
-    }
-
-def _get_groupable_suggestions(schema_embeddings: Dict[str, Any]) -> List[str]:
-    """
-    (¡Arregla el bug de "como: ?"!)
-    Sugiere columnas agrupables extrayendo sus descripciones del
-    schema_embeddings.
-    """
-    suggestions = []
-    for key, data in schema_embeddings.items():
-        if data.get("type") == "column":
-            # Asumimos que las columnas con "nombre", "tipo", "categoria" 
-            # en su clave son agrupables.
-            if "nombre" in key or "tipo" in key or "categoria" in key:
-                # Extraer el "nombre" del texto, ej. "Columna: nombre en la tabla equipo..."
-                match = re.search(r"Columna:\s*([^\s]+)", data.get("text", ""))
-                if match:
-                    suggestions.append(match.group(1))
-    
-    return list(set(suggestions))[:5] # 5 sugerencias únicas
+def _detect_aggregation_and_metric(text: str) -> List[Dict[str, str]]:
+    aggs = []
+    txt = text.lower()
+    if any(w in txt for w in ["promedio", "media", "avg", "mean"]):
+        if re.search(r"(puntaje|nivel|score|salario|ingreso|ventas?)", txt):
+            aggs.append({"op": "avg", "col": "nivel_contribucion"})
+    if any(w in txt for w in ["suma", "total", "sum"]):
+        if re.search(r"(ventas|monto|cantidad|importe|score|puntaje)", txt):
+            aggs.append({"op": "sum", "col": "monto"})
+    if any(w in txt for w in ["contar", "cantidad", "numero", "cuantos", "count"]):
+        aggs.append({"op": "count", "col": "*"})
+    if any(w in txt for w in ["top", "mejores", "peores", "rank"]):
+        aggs.append({"op": "rank_hint", "col": "nivel_contribucion"})
+    return aggs
 
 
 def _detect_visualization(text: str) -> Optional[str]:
-    # ... (Sin cambios) ...
     txt = text.lower()
     if any(w in txt for w in ["gráfico", "grafico", "plot", "curve", "serie temporal", "trend", "tendencia", "evolución"]):
         return "line"
@@ -160,17 +39,25 @@ def _detect_visualization(text: str) -> Optional[str]:
         return "table"
     return None
 
-# ======================================================
-# 2. FUNCIÓN PRINCIPAL DE PLANIFICACIÓN (SEMÁNTICA)
-# ======================================================
+
+def _need_clarification_for_plan(plan: Dict[str, Any]) -> Optional[str]:
+    accion = plan.get("accion")
+    filtros = plan.get("filtros", {})
+    if accion == "evaluar_colaborador" and not filtros.get("persona"):
+        return "¿A qué colaborador te refieres? Indica nombre o identificador."
+    if accion == "generar_informe":
+        tabla = plan.get("entidades", {}).get("tabla", "")
+        if tabla in ("usuario", "colaborador") and not filtros:
+            return "¿Quieres un informe para toda la organización o para un equipo/periodo específico?"
+    return None
+
 
 def plan_actions(intent_data: Dict[str, Any],
                  schema_semantic: Dict[str, Any],
-                 schema_embeddings: Dict[str, Any], # <--- ¡AHORA USAMOS ESTO!
+                 schema_embeddings: Dict[str, Any],
                  last_plan: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
-    Genera un plan de acción basado 100% en el schema_embeddings,
-    usando similitud semántica para mapear conceptos.
+    Genera un plan de acción, utilizando el plan anterior (last_plan) para dar contexto a solicitudes de continuación.
     """
     tipo = intent_data.get("tipo", "conversacion")
     entidades_raw = intent_data.get("entidades", {}) or {}
@@ -182,158 +69,195 @@ def plan_actions(intent_data: Dict[str, Any],
         "entidades": {},
         "filtros": {},
         "texto": texto,
-        "meta": {} 
+        "meta": {} # Inicializar meta
     }
     
     # ----------------------------------------------------
-    # 🎯 LÓGICA DE CONTINUACIÓN (Sin cambios)
+    # 🎯 LÓGICA DE CONTINUACIÓN (Memoria de datos)
     # ----------------------------------------------------
+    # Heurística: ¿El texto solo contiene una solicitud de visualización y NO es una nueva pregunta de datos?
     is_visualization_change_only = (_detect_visualization(texto) is not None) and \
-                                   (tipo in ["conversacion", "consultar_datos", "generar_informe"]) and \
-                                   (not any(w in texto for w in ["qué", "cuales", "cuantos", "dime", "saber"])) and \
-                                   (not entidades_raw.get("area") and not entidades_raw.get("periodo"))
+                                 (tipo in ["conversacion", "consultar_datos", "generar_informe"]) and \
+                                 (not any(w in texto for w in ["qué", "cuales", "cuantos", "dime", "saber"])) and \
+                                 (not entidades_raw.get("area") and not entidades_raw.get("periodo")) and \
+                                 (not _detect_aggregation_and_metric(texto))
     
+    # Si tenemos un plan anterior Y la solicitud es una continuación
     if last_plan and (is_visualization_change_only or (tipo in ["generar_informe", "consultar_datos"] and not entidades_raw)):
-        logger.info("Reutilizando contexto del plan anterior.")
-        plan.update(last_plan) # Heredar todo el plan anterior
-        plan["meta"] = last_plan.get("meta", {}) # Asegurar que meta exista
         
+        logger.info("Reutilizando contexto del plan anterior.")
+        
+        # Reutilizar entidades, filtros y meta base del plan anterior
+        plan["entidades"] = last_plan.get("entidades", {})
+        plan["filtros"] = last_plan.get("filtros", {})
+        plan["meta"] = last_plan.get("meta", {})
+        
+        # 📌 LÓGICA DE REUTILIZACIÓN FORZADA (El cambio más importante)
         if is_visualization_change_only and last_plan.get("accion") in ["generar_informe", "evaluar_colaborador"]:
+            
+            # Forzar la acción a reutilizar la consulta anterior
             plan["accion"] = "reutilizar_consulta"
             plan["objetivo"] = f"actualizar visualización de la consulta anterior: {last_plan.get('objetivo', 'datos')}"
-            previous_sql = last_plan.get("executed_sql")
             
+            # Pasar el SQL anterior para que el Query Generator lo use directamente
+            previous_sql = last_plan.get("executed_sql")
             if previous_sql:
                 plan["meta"]["previous_sql"] = previous_sql
             else:
+                # Si no hay SQL anterior, no podemos reutilizar; volvemos al flujo normal
                 plan["accion"] = "generar_informe"
             
+            # Sobrescribir el tipo de visualización si se detectó uno nuevo
             vis_new = _detect_visualization(texto)
             if vis_new:
                 plan["meta"]["visualization"] = vis_new
             
+            # 🛑 Si la acción es reutilizar_consulta y tenemos el SQL, terminamos aquí.
             if plan["accion"] == "reutilizar_consulta":
                 plan["confidence"] = 1.0 
                 plan["confidence_reasons"] = ["reutilizacion_forzada_visualizacion"]
                 return plan
-        
+        # Si no es un cambio de visualización forzado, la acción y el objetivo mantienen la del plan anterior
         elif last_plan.get("accion") in ["generar_informe", "evaluar_colaborador"]:
             plan["accion"] = last_plan["accion"]
             plan["objetivo"] = last_plan["objetivo"]
 
-    # ----------------------------------------------------
-    # 1. Mapeo de Entidades (El Cerebro Semántico)
-    # ----------------------------------------------------
-    
-    # Si schema_embeddings está vacío, no podemos ser semánticos
-    if not schema_embeddings:
-        logger.error("¡Schema_embeddings está vacío! El planificador semántico no puede funcionar.")
-        raise LogicalError(
-            "Error de configuración interna: El cerebro semántico (schema_embeddings) está vacío.",
-            "Por favor, reinicia la aplicación o verifica el `schema_loader.py`."
-        )
 
-    # Extraer los conceptos a mapear
-    concepts = _extract_concepts(texto)
-    operation = concepts["operation"]
+    # ----------------------------------------------------
+    # 1. Detección de entidades y atributos (priorizar nuevo input)
+    # ----------------------------------------------------
     
-    # --- Mapear la Tabla Principal ---
-    # (Usamos la heurística simple por ahora, se puede mejorar a semántica)
-    tabla_detectada = concepts["main_table_term"]
+    # --- Detectar tabla usando esquema semántico ---
+    tabla_detectada = None
+    candidate_tables = list(schema_semantic.get("tables", {}).keys()) + ["document_embeddings"]
+    # Buscar coincidencia en entidades o texto
+    for candidate in candidate_tables:
+        kws = schema_semantic.get("tables", {}).get(candidate, {}).get("keywords", [])
+        if any(word in texto for word in kws):
+            tabla_detectada = candidate
+            break
     
-    # Si es una intención de datos, y no hay tabla, buscamos semánticamente
-    if tipo in ["generar_informe", "evaluar"] and not tabla_detectada:
-        # Busca la tabla más relevante para toda la consulta
-        table_match = _find_semantic_match(texto, schema_embeddings, entity_type="table")
-        if table_match:
-            tabla_detectada = table_match["key"] # ej. "evaluacion"
-    
+    # Si se detectó una tabla, sobrescribir la del plan anterior
     if tabla_detectada:
         plan["entidades"]["tabla"] = tabla_detectada
-    elif tipo in ["generar_informe", "evaluar"]:
-         # Fallo Rápido: No hay tabla
-         logger.warning(f"No se pudo detectar la tabla principal para: {texto}")
-         raise LogicalError(
-            f"No pude identificar una entidad principal (como 'evaluacion' o 'usuario') en tu solicitud.",
-            "Por favor, reformula tu pregunta."
-         )
+    else:
+        tabla_detectada = plan["entidades"].get("tabla", "usuario") # Usar tabla del plan o fallback
 
-    # --- Mapear la Métrica ("puntaje") ---
-    mapped_metric = None
-    if concepts["metric_term"]:
-        metric_match = _find_semantic_match(concepts["metric_term"], schema_embeddings, entity_type="column")
-        if metric_match:
-            # key es "tabla.columna", la dividimos
-            parts = metric_match["key"].split('.')
-            if len(parts) == 2:
-                mapped_metric = parts[1] # ej. "valor_respuesta"
-            
-    # --- Mapear el Agrupador ("facultad") ---
-    mapped_group_by = None
-    if concepts["group_by_term"]:
-        group_by_match = _find_semantic_match(concepts["group_by_term"], schema_embeddings, entity_type="column")
-        if group_by_match:
-            # key es "tabla.columna"
-            parts = group_by_match["key"].split('.')
-            if len(parts) == 2:
-                mapped_group_by = {"table": parts[0], "column": parts[1]} # ej. {"table": "equipo", "column": "nombre"}
-        
-        # ❗️ EL "POR DIOS" - Fallo Rápido y Limpio
-        elif tipo in ["generar_informe", "evaluar"]: # Solo si era una consulta importante
-            logger.warning(f"Término de 'group by' no mapeado: {concepts['group_by_term']}")
-            suggestions = _get_groupable_suggestions(schema_embeddings) # ¡Ahora da sugerencias!
-            raise LogicalError(
-                f"El término '{concepts['group_by_term']}' que mencionaste no existe o no es claro en mi base de datos.",
-                f"¿Quizás quisiste agrupar por una entidad que sí conozco, como: {', '.join(suggestions)}?"
-            )
-
-    # ----------------------------------------------------
-    # 3. Construcción del Plan (Basado en el Mapeo Semántico)
-    # ----------------------------------------------------
+    # --- Detectar atributos validos según esquema semántico ---
+    atributos = []
+    columnas = schema_semantic.get("tables", {}).get(tabla_detectada, {}).get("columns", [])
+    for col in columnas:
+        if col.lower() in texto:
+            atributos.append(col)
     
-    plan["accion"] = "generar_informe" if tipo in ["generar_informe", "evaluar"] else "chat_general"
-    plan["objetivo"] = "consultar y sintetizar información de la base de datos"
-         
-    # --- Filtros (Sin cambios, aún heurísticos) ---
+    # Si se detectaron atributos, sobrescribir. Si no, usar los del contexto o el fallback
+    if atributos:
+        plan["entidades"]["atributos"] = atributos
+    elif not plan["entidades"].get("atributos"):
+        plan["entidades"]["atributos"] = ["*"]
+        
+    # --- Filtros heurísticos (Sobreescribir o añadir a los del plan anterior) ---
     periodo_match = re.search(r"(20\d{2})(?:[-/](20\d{2}))?", texto)
     if periodo_match:
         plan["filtros"]["periodo"] = periodo_match.group(0)
-    
+    # Detectar equipo explícito (versión mejorada)
+    equipo_match = re.search(r"equipo\s*[:=]?\s*['\"]?([a-zA-Z0-9_\-]+)['\"]?", texto)
+    if equipo_match:
+        nombre_equipo = equipo_match.group(1).lower()
+        if nombre_equipo not in ["agrupados", "todos", "completo", "usar", "usando"]:
+            plan["filtros"]["equipo"] = nombre_equipo
+        else:
+            # Si el usuario quiere todos/agrupados, eliminamos el filtro previo
+            plan["filtros"].pop("equipo", None)
+            
     persona = entidades_raw.get("persona") or entidades_raw.get("nombre")
     if persona:
         if isinstance(persona, list):
             persona = persona[0]
         plan["filtros"]["persona"] = persona
 
+    # --- Determinar acción (Sobrescribir si hay una intención fuerte) ---
+    if tipo in ["generar_informe", "consultar_datos", "consultar"]:
+        plan["accion"] = "generar_informe"
+        plan["objetivo"] = "consultar y sintetizar información de la base de datos"
+    elif tipo == "evaluar":
+        plan["accion"] = "evaluar_colaborador"
+        plan["objetivo"] = "analizar métricas de desempeño de un colaborador"
+    elif tipo == "guardar_resultado":
+        plan["accion"] = "guardar_resultado"
+        plan["objetivo"] = "almacenar información procesada"
+        
+    # plan["entidades"]["tabla"] y plan["entidades"]["atributos"] ya están seteados arriba
+
     # --- Meta para query_generator ---
-    meta: Dict[str, Any] = plan.get("meta", {}) 
+    meta: Dict[str, Any] = plan.get("meta", {}) # Reutilizar meta del plan si existe
 
-    # Aggregations (Semántico)
-    if operation and mapped_metric:
-        meta["aggregations"] = [{"op": operation, "col": mapped_metric}]
-    elif operation == "count":
-        meta["aggregations"] = [{"op": "count", "col": "*"}]
+    # Aggregations y group_by (Sobrescribir si se detecta nueva, sino mantener la anterior)
+    aggregations = _detect_aggregation_and_metric(texto)
+    if aggregations:
+        # validar columnas con schema_semantic
+        valid_aggs = [agg for agg in aggregations if agg["col"] in columnas or agg["col"] == "*"]
+        if valid_aggs:
+            meta["aggregations"] = valid_aggs
 
-    # Group_by (Semántico)
-    if mapped_group_by:
-        meta["group_by"] = [mapped_group_by] 
+    # Group_by heurístico (Sobrescribir si se detecta nueva, sino mantener la anterior)
+    group_by = []
+    for col in columnas:
+        if f"por {col.lower()}" in texto:
+            group_by.append(col)
+    if group_by:
+        meta["group_by"] = group_by
 
-    # Visualización (Sin cambios)
+    # Visualización (Siempre se sobrescribe, ya que es el cambio más probable)
     vis = _detect_visualization(texto)
     if vis:
         meta["visualization"] = vis
-    elif operation: # Default a tabla si hay agregación
-        meta["visualization"] = "table"
 
-    # Límite (Sin cambios)
+    # Límite
     if any(w in texto for w in ["todos", "completo", "todas"]):
         meta["limit"] = 1000
+    # Si no se especifica, usa el límite anterior o el default 100
     elif "limit" not in meta:
         meta["limit"] = 100
 
-    plan["meta"] = meta
-    
-    # ... (Confianza y Clarificación se pueden omitir por ahora) ...
+    # --- Embeddings ---
+    if tabla_detectada == "document_embeddings":
+        meta["embedding_query"] = texto
+        meta["top_k"] = 10
+        embedding_fields = schema_embeddings.get("vector_fields", [])
+        if embedding_fields:
+            meta["embedding_field"] = embedding_fields[0]
 
-    logger.debug("Plan semántico final generado: %s", json.dumps(plan, indent=2))
+    plan["meta"] = meta
+
+    # --- Confianza heurística ---
+    score = 0.0
+    reasons: List[str] = []
+    if persona:
+        score += 0.25; reasons.append("persona_detectada")
+    if periodo_match:
+        score += 0.15; reasons.append("periodo_detectado")
+    if tabla_detectada and tabla_detectada != "usuario":
+        score += 0.2; reasons.append(f"tabla_detectada:{tabla_detectada}")
+    if aggregations:
+        score += 0.1; reasons.append("aggregation_hint")
+    if vis:
+        score += 0.1; reasons.append(f"visualization_suggested:{vis}")
+        
+    # ➕ Bonificación por reusar el contexto (Solo si no hubo detección de tabla nueva)
+    if last_plan and not tabla_detectada:
+        score += 0.15; reasons.append("contexto_reutilizado")
+        
+    confidence = min(round(score, 3), 1.0)
+    plan["confidence"] = confidence
+    plan["confidence_reasons"] = reasons
+
+    # --- Clarificación si hace falta ---
+    clarify_q = _need_clarification_for_plan(plan)
+    if clarify_q:
+        plan["clarify"] = True
+        plan["clarify_question"] = clarify_q
+    else:
+        plan["clarify"] = False
+
     return plan

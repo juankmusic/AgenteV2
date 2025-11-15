@@ -1,7 +1,8 @@
+# core/chat_logic.py
 import os
 import sys
 import uuid
-import re 
+import re # <-- Añadido
 import pandas as pd
 import psycopg2
 import pypdf
@@ -21,10 +22,13 @@ from core.ai_core.nlp_embeddings import analyze_text
 from core.ai_core.query_generator import generate_query_from_plan
 from core.ai_core.report_synthesizer import generate_report
 from core.ai_core.schema_loader import load_schema as schema_loader
-from core.ai_core.nlp_embeddings import get_last_action_plan, store_action_plan
 
-import logging # Para logging de errores
-from core.exceptions import LogicalError, InvalidOperationError, InvalidVisualizationError
+# <<< MODIFICACIÓN >>>
+# Importación correcta del nuevo manejador de errores
+from core.errors.error_manager import handle_error
+# <<< FIN MODIFICACIÓN >>>
+
+from core.ai_core.nlp_embeddings import get_last_action_plan, store_action_plan
 
 # ===============================
 # CONFIGURACIÓN
@@ -82,7 +86,6 @@ def extract_chart_type(text):
 # ===============================
 # CHAT & SESIONES
 # ===============================
-# ... (Funciones save_message, get_history, list_sessions, select_or_create_session SIN CAMBIOS) ...
 def save_message(session_id, role, msg):
     conn = connect_db()
     if not conn:
@@ -132,193 +135,150 @@ def select_or_create_session():
             return sessions[int(ch)-1][0]
     return str(uuid.uuid4())
 
+
 # ===============================
 # MODELO DE CHAT
 # ===============================
+
 def deepseek_chat(session_id, question, context=None, history=None): 
     global SESSION_STATES
     
-    # 1. 🔄 Lógica de sesión (SIN CAMBIOS)
+    # 1. 🔄 Inicializar o recuperar el estado de la sesión
     if session_id not in SESSION_STATES:
         SESSION_STATES[session_id] = {'last_chart_type': None}
+        
     session_state = SESSION_STATES[session_id]
+    
+    # 1.1 📊 Intentar extraer el tipo de gráfico del mensaje actual
     current_chart_type = extract_chart_type(question)
+    
+    # 1.2 💡 Lógica de memoria/actualización
     if current_chart_type:
+        # El usuario ha especificado un nuevo tipo de gráfico, ¡actualizar la memoria!
         session_state['last_chart_type'] = current_chart_type
         print(f"✅ Tipo de gráfico en memoria actualizado: {current_chart_type}")
+    
+    # Obtener el tipo de gráfico a USAR (el recordado)
     chart_type_to_use = session_state['last_chart_type']
     
-    # --- PROMPT DEL SISTEMA (SIN CAMBIOS) ---
+    # --- PROMPT DEL SISTEMA (IDÉNTICO) ---
     system_prompt = (
         "Eres un asistente inteligente y amable. "
-        # ... (resto del prompt sin cambios) ...
+        "Puedes mantener una conversación general o analizar documentos PDF/CSV cargados. "
+        "Eres un asistente inteligente y autónomo (AIGR). "
+        "consultar bases de datos, generar informes y decidir cuándo graficar o sintetizar texto. "
+        "Sé preciso, no inventes información, y explica tus resultados de forma clara. "
+        "Si hay contexto, úsalo para responder basándote en el documento. "
+        "Si no, responde de forma natural como un chatbot general. "
+        "Sé claro, conciso y no inventes información. "
+        "Eres un agente inteligente con memoria y capacidad de análisis contextual. "
+        "Puedes mantener conversaciones generales, generar informes automáticos, "
+        "consultar datos o analizar información compleja. "
         "Si el usuario hace una petición técnica o analítica, responde de forma estructurada."
     )
     
-    # === 1️⃣ Análisis semántico profundo (SIN CAMBIOS) ===
+    # === 1️⃣ Análisis semántico profundo ===
     semantic_data = analyze_text(question)
 
-    # === 2️⃣ Detección de intención cognitiva (SIN CAMBIOS) ===
+    # === 2️⃣ Detección de intención cognitiva ===
     intent_data = detect_intention(semantic_data["texto"])
     tipo = intent_data.get("tipo", "conversacion")
-    confianza = intent_data.get("confianza", 1.0)
 
+    # Combinar entidades si el detector no las incluye
     if not intent_data.get("entidades"):
         intent_data["entidades"] = semantic_data.get("entidades", {})
 
-    # === Manejo de Ambigüedad (SIN CAMBIOS) ===
-    CONFIDENCE_THRESHOLD = 0.5 
-    if tipo in ["evaluar", "generar_informe", "consultar_datos"] and confianza < CONFIDENCE_THRESHOLD:
-        logging.warning(f"Confianza baja ({confianza}) para intención '{tipo}'. Pidiendo clarificación.")
-        return (
-            "No estoy completamente seguro de tu solicitud. "
-            f"Detecté que podrías querer '{tipo}', pero la petición es ambigua. "
-            "¿Podrías reformular tu pregunta de forma más específica?"
-        )
-
     # === 3️⃣ Si es una intención cognitiva, activar modo AIGR ===
     if tipo in ["evaluar", "generar_informe", "consultar_datos", "guardar_resultado"]:
-        print(f"🧠 Modo AIGR activo (intención: {tipo}, confianza: {confianza})")
+        print(f"🧠 Modo AIGR activo (intención: {tipo})")
+
+        # 🔹 Cargar esquemas correctamente
+        schema_semantic, schema_embeddings = schema_loader()
         
-        # ❗️ Envolvemos todo el flujo AIGR en un try/except general
+        # 3.0b Recuperar el plan anterior de la BD (si existe)
+        last_plan = get_last_action_plan(session_id) 
+
+        # 3.1 Planificación autónoma
+        # Se pasa el last_plan para que el dynamic_planner decida si reutilizar el contexto
+        plan = plan_actions(intent_data, schema_semantic, schema_embeddings, last_plan)
+        
+        # 3.2 Generar SQL dinámico
+        # El generate_query_from_plan debe ahora verificar plan["accion"] == "reutilizar_consulta"
+        sql_result = generate_query_from_plan(plan)
+        sql = sql_result.get("sql")
+
+        if not sql:
+            return "No pude generar una consulta válida basada en tu solicitud."
+
+        print(f"📜 SQL generado:\n{sql}")
+
+        # 3.3 Ejecutar SQL
+        df = pd.DataFrame()
         try:
-            # 🔹 Cargar esquemas correctamente
-            schema_semantic, schema_embeddings = schema_loader()
-            
-            # 3.0b Recuperar el plan anterior de la BD (si existe)
-            last_plan = get_last_action_plan(session_id) 
+            connection_url = URL.create(
+                drivername="postgresql+psycopg2",
+                username="postgres",
+                password="postgre",
+                host="localhost",
+                port=5432,
+                database="bdgestion_agente",
+                query={"client_encoding": "UTF8"} 
+            )
 
-            # 3.1 Planificación autónoma
-            plan = plan_actions(intent_data, schema_semantic, schema_embeddings, last_plan)
-            
-            # 3.2 Generar SQL dinámico
-            sql_result = generate_query_from_plan(plan)
-            
-            # --- Manejo de error de validación (SIN CAMBIOS) ---
-            if sql_result.get("error_type") == "LogicalError":
-                error_msg = sql_result.get("descripcion", "Error lógico en la solicitud.")
-                suggestion = sql_result.get("suggested_action")
-                response = f"❌ **Error en la operación:** {error_msg}"
-                if suggestion:
-                    response += f"\n\n**Sugerencia:** {suggestion}"
-                return response
-                
-            sql = sql_result.get("sql")
+            engine = create_engine(connection_url, connect_args={"options": "-c client_encoding=WIN1252"})
+            with engine.connect() as connection:
+                df = pd.read_sql_query(text(sql), connection)
 
-            if not sql:
-                return "No pude generar una consulta válida basada en tu solicitud."
-
-            print(f"📜 SQL generado:\n{sql}")
-
-            # 3.3 Ejecutar SQL
-            df = pd.DataFrame()
-            try:
-                connection_url = URL.create(
-                    drivername="postgresql+psycopg2",
-                    username="postgres",
-                    password="postgre",
-                    host="localhost",
-                    port=5432,
-                    database="bdgestion_agente",
-                    query={"client_encoding": "UTF8"} 
-                )
-
-                engine = create_engine(connection_url, connect_args={"options": "-c client_encoding=WIN1252"})
-                with engine.connect() as connection:
-                    df = pd.read_sql_query(text(sql), connection)
-
-            # 👇 ==================================================
-            # 👇 INICIO DE LA CORRECCIÓN 2 (chat_logic.py)
-            # 👇 ==================================================
-            except Exception as e:
-                print(f"❌ Error ejecutando SQL dinámico: {e}")
-                
-                # Interpretar el error de BD para dar una respuesta semántica
-                # NUNCA mostrar 'e' o 'sql' al usuario.
-                error_str = str(e).lower() 
-                user_message = "❌ Hubo un error al procesar tu consulta."
-
-                if "undefined function" in error_str and "sum(character varying)" in error_str:
-                    # Error "Suma de Nombres" (si la validación previa fallara)
-                    user_message = ("❌ **Error en la operación:** No es posible realizar una operación matemática (como 'suma') sobre una columna de texto (como 'nombres').")
-                    user_message += "\n\n**Sugerencia:** ¿Quizás quisiste 'contar' (count) los registros?"
-                
-                elif "undefined table" in error_str or "falta una entrada para la tabla" in error_str:
-                    # Error "Facultad" (alucinación de tabla)
-                    user_message = ("❌ **Error en la consulta:** No pude encontrar todos los datos que mencionaste (por ejemplo, 'facultad'). Parece que esa tabla o categoría no existe en mi base de datos.")
-                    user_message += "\n\n**Sugerencia:** ¿Podrías verificar que los términos que usas (como áreas, departamentos o tablas) sean correctos?"
-
-                elif "undefined column" in error_str:
-                    col_match = re.search(r'columna "([^"]+)" no existe', error_str)
-                    col = col_match.group(1) if col_match else "desconocida"
-                    user_message = (f"❌ **Error en la consulta:** La columna '{col}' no parece existir en el contexto de tu solicitud.")
-                
-                else:
-                    # Fallback genérico pero limpio
-                    user_message = "❌ No pude procesar tu solicitud. La consulta generada no fue válida para la base de datos y causó un error."
-                
-                return user_message
-            # 👆 ==================================================
-            # 👆 FIN DE LA CORRECCIÓN 2
-            # 👆 ==================================================
-
-
-            # 3.4 Generar informe o acción autónoma
-            # --- Este bloque try/except ya estaba bien (SIN CAMBIOS) ---
-            try:
-                if plan["accion"] == "guardar_resultado":
-                    store_action_plan(session_id, plan, executed_sql=sql)
-                    return "✅ Los datos fueron procesados y almacenados correctamente."
-                
-                store_action_plan(session_id, plan, executed_sql=sql)
-                
-                # ... (Lógica para decidir 'final_chart_type' sin cambios) ...
-                plan_vis_type = plan.get("meta", {}).get("visualization")
-                final_chart_type = chart_type_to_use or plan_vis_type or 'bar'
-                
-                if final_chart_type or "gráfico" in question.lower():
-                    if final_chart_type != session_state['last_chart_type']:
-                        session_state['last_chart_type'] = final_chart_type
-                        print(f"✅ Tipo de gráfico final seleccionado: {final_chart_type}")
-
-                    report = generate_report(df, question, final_chart_type) 
-                    return f"🧩 Resultado de la consulta (mostrado como **gráfico de {final_chart_type}**):\n\n{report}"
-
-                else:
-                    report = generate_report(df, question) # Sin gráfico
-                return f"🧩 Resultado de la consulta:\n\n{report}"
-
-            # 🚀 MANEJO DE ERROR LÓGICO (Gráfico inválido - SIN CAMBIOS)
-            except InvalidVisualizationError as e:
-                print(f"🎨 Error de visualización detectado: {e}")
-                report_text_only = generate_report(df, question, chart_type=None, force_text_only=True)
-                error_msg = str(e)
-                suggestion = e.suggested_action
-                
-                response = f"{report_text_only}\n\n"
-                response += f"⚠️ **Nota sobre el gráfico:** {error_msg}"
-                if suggestion:
-                    response += f"\n\n**Sugerencia:** {suggestion}"
-                return response
-            
-            except Exception as e:
-                # Captura de error genérico en la generación del reporte
-                print(f"❌ Error generando el reporte (post-SQL): {e}")
-                return f"❌ Error al sintetizar el reporte: {e}"
-
-        # Captura de error genérico en el flujo AIGR (planificación)
-        # --- Este bloque ya estaba bien (SIN CAMBIOS) ---
         except Exception as e:
-             # Si el error es una de nuestras excepciones lógicas (ej. de plan_actions)
-             if isinstance(e, LogicalError):
-                 logging.error(f"Error lógico (inesperado) detectado: {e}")
-                 response = f"❌ **Error en la operación:** {str(e)}"
-                 if e.suggested_action:
-                     response += f"\n\n**Sugerencia:** {e.suggested_action}"
-                 return response
-                 
-             logging.exception(f"❌ Error crítico en el flujo AIGR: {e}")
-             return f"❌ Ocurrió un error inesperado al procesar tu solicitud: {e}"
+            print(f"❌ Error en la ejecución de SQL: {e}") # Log técnico para la consola
+            user_message = handle_error(e) # Llama al nuevo manejador
+            return user_message # Devuelve el mensaje amigable
+
+        # 3.4 Generar informe o acción autónoma
+        if plan["accion"] == "guardar_resultado":
+            # 3.5 PERSISTIR EL NUEVO PLAN DE ACCIÓN Y EL SQL EJECUTADO
+            store_action_plan(session_id, plan, executed_sql=sql)
+            return "✅ Los datos fueron procesados y almacenados correctamente."
+        
+        # 3.5 PERSISTIR EL NUEVO PLAN DE ACCIÓN Y EL SQL EJECUTADO
+        store_action_plan(session_id, plan, executed_sql=sql) 
+        
+        # 3.6 Decidir si graficar o sintetizar
+        
+        # Obtener la sugerencia de visualización del plan (puede ser 'line')
+        plan_vis_type = plan.get("meta", {}).get("visualization")
+        
+       
+        final_chart_type = chart_type_to_use
+        
+        if not final_chart_type: 
+            # Si el mensaje no tenía gráfico, usar la sugerencia del plan ('line')
+            final_chart_type = plan_vis_type 
+            
+        if not final_chart_type: 
+            # Si ni el mensaje ni el plan lo tenían, usar el default
+            final_chart_type = 'bar'
+
+        # Si el plan sugirió una visualización, o hay una en memoria, o se preguntó explícitamente por un gráfico
+        if final_chart_type or "gráfico" in question.lower():
+            
+            # Actualizamos la memoria local con el tipo de gráfico final
+            if final_chart_type != session_state['last_chart_type']:
+                session_state['last_chart_type'] = final_chart_type
+                # Usamos un mensaje de debug más claro para ver qué se decidió
+                print(f"✅ Tipo de gráfico final seleccionado: {final_chart_type}")
+
+
+            report = generate_report(df, question, final_chart_type) 
+            
+            # Generar mensaje de respuesta
+            return f"🧩 Resultado de la consulta (mostrado como **gráfico de {final_chart_type}**):\n\n{report}"
+
+        else:
+            # Llama a la función SIN tipo de gráfico (sólo síntesis de texto/reporte)
+            report = generate_report(df, question)
+
+        return f"🧩 Resultado de la consulta:\n\n{report}"
 
     # === 4️⃣ Si no hay intención cognitiva, usar modo conversación (IDÉNTICO) ===
     semantic_contexts = search_similar_embeddings(question, top_k=3)
