@@ -190,26 +190,56 @@ def get_history():
 # ============================================================
 # RUTA: Listar sesiones anteriores
 # ============================================================
+# ============================================================
+# RUTA: Listar sesiones anteriores (ACTUALIZADA)
+# ============================================================
 @chat_bp.route("/sessions", methods=["GET"])
 def list_sessions():
-    """Devuelve todas las sesiones existentes con cantidad de mensajes."""
+    """Devuelve todas las sesiones con conteo, fecha y el primer mensaje del usuario."""
     conn = connect_db()
     if not conn:
         return jsonify({"sessions": []})
     try:
         with conn.cursor() as cur:
             cur.execute("""
-                SELECT session_id, COUNT(*) as msg_count, MAX(timestamp) as last_msg
-                FROM chatbot_logs
-                GROUP BY session_id
+                SELECT 
+                    T1.session_id, 
+                    COUNT(T1.id) as msg_count, 
+                    MAX(T1.timestamp) as last_msg,
+                    -- Subconsulta para obtener el mensaje (message) y la hora (timestamp) 
+                    -- del primer mensaje del usuario (role='user').
+                    (SELECT T2.message
+                     FROM chatbot_logs AS T2
+                     WHERE T2.session_id = T1.session_id AND T2.role = 'user'
+                     ORDER BY T2.timestamp ASC
+                     LIMIT 1) AS first_user_msg
+                FROM chatbot_logs AS T1
+                WHERE T1.session_id IS NOT NULL 
+                GROUP BY T1.session_id
                 ORDER BY last_msg DESC
             """)
             rows = cur.fetchall()
-        sessions = [{"session_id": r[0], "msg_count": r[1]} for r in rows]
+        
+        sessions = []
+        for r in rows:
+            # r[0]: session_id, r[1]: msg_count, r[2]: last_msg (datetime), r[3]: first_user_msg
+            first_msg = r[3] if r[3] else "Sesión sin nombre"
+            
+            sessions.append({
+                "session_id": r[0],
+                "msg_count": r[1],
+                "last_updated": r[2].isoformat(),
+                "name": first_msg # <- ¡Nuevo campo de nombre!
+            })
+        
         return jsonify({"sessions": sessions})
+    
+    except Exception as e:
+        print(f"Error al listar sesiones: {e}")
+        return jsonify({"sessions": []})
+    
     finally:
         conn.close()
-
 
 
 # ============================================================
