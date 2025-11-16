@@ -109,14 +109,26 @@ def classify_intention_deepseek(text):
         logger.warning("classify_intention_deepseek: cliente OpenAI no inicializado.")
         return {"tipo": "desconocido", "subtipo": None, "confianza": 0.0}
 
+    # <<< INICIO DE LA MEJORA DEL PROMPT >>>
     prompt = f"""
     Analiza el siguiente texto y clasifica la intención principal del usuario.
-    Posibles tipos:
-    - evaluar
-    - generar_informe
-    - consultar
-    - guardar_resultado
-    - conversacion_general
+
+    Aquí están las posibles intenciones y cómo diferenciarlas:
+
+    1.  **evaluar**: Cuando el usuario quiere analizar el rendimiento o desempeño de algo/alguien.
+        * Ejemplos: "Cómo fue el rendimiento de Ana?", "Califica al equipo de ventas"
+
+    2.  **generar_informe**: Cuando el usuario pide un análisis complejo, un resumen de datos, una comparación, o datos para un gráfico.
+        * Ejemplos: "Analiza las ventas del último trimestre", "Dame un resumen de los gastos", "Compara el producto A vs B", "Muéstrame los datos de ventas por región"
+
+    3.  **consultar**: Cuando el usuario busca un dato específico, un hecho o una lista simple. No requiere análisis, solo búsqueda.
+        * Ejemplos: "¿Cuál es el email de Juan?", "¿Cuántos empleados hay en el departamento de IT?", "Lista los productos en stock"
+
+    4.  **guardar_resultado**: Cuando el usuario pide explícitamente guardar, registrar o insertar datos.
+        * Ejemplos: "Guarda esta nota", "Registra una nueva venta"
+
+    5.  **conversacion_general**: Saludos, despedidas o charla casual.
+        * Ejemplos: "Hola", "Cómo estás?", "Gracias"
 
     Devuelve la respuesta en formato JSON válido:
     {{
@@ -125,9 +137,10 @@ def classify_intention_deepseek(text):
         "confianza": 0.0
     }}
 
-    Texto:
-    {text}
+    Texto a analizar:
+    "{text}"
     """
+    # <<< FIN DE LA MEJORA DEL PROMPT >>>
 
     try:
         res = openai_client.chat.completions.create(
@@ -136,11 +149,11 @@ def classify_intention_deepseek(text):
                 {"role": "system", "content": "Eres un analista semántico experto en clasificación de intenciones. Devuelve solo JSON válido."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3
+            temperature=0.1 # <-- Bajar la temperatura para que sea más predecible
         )
         raw_output = res.choices[0].message.content.strip()
 
-        # Intentar extraer bloque JSON
+        # ... (El resto de tu lógica de parsing de JSON está bien) ...
         json_block = _extract_json_block(raw_output)
         if json_block:
             try:
@@ -176,7 +189,7 @@ def classify_intention_deepseek(text):
                 return {"tipo": "desconocido", "subtipo": None, "confianza": 0.0}
 
     except Exception as e:
-        logger.exception("⚠️ DeepSeek no pudo clasificar: %s", e)
+        logger.exception("⚠️ LLM (OpenAI) no pudo clasificar: %s", e)
         return {"tipo": "desconocido", "subtipo": None, "confianza": 0.0}
 
 # ==============================================

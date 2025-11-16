@@ -63,6 +63,8 @@ def plan_actions(intent_data: Dict[str, Any],
     entidades_raw = intent_data.get("entidades", {}) or {}
     texto = (intent_data.get("texto") or "").lower()
 
+    persona = None
+
     plan: Dict[str, Any] = {
         "accion": "chat_general",
         "objetivo": "mantener conversación",
@@ -83,6 +85,7 @@ def plan_actions(intent_data: Dict[str, Any],
                                  (not _detect_aggregation_and_metric(texto))
     
     # Si tenemos un plan anterior Y la solicitud es una continuación
+
     if last_plan and (is_visualization_change_only or (tipo in ["generar_informe", "consultar_datos"] and not entidades_raw)):
         
         logger.info("Reutilizando contexto del plan anterior.")
@@ -160,17 +163,19 @@ def plan_actions(intent_data: Dict[str, Any],
     periodo_match = re.search(r"(20\d{2})(?:[-/](20\d{2}))?", texto)
     if periodo_match:
         plan["filtros"]["periodo"] = periodo_match.group(0)
-    # Detectar equipo explícito (versión mejorada)
-    equipo_match = re.search(r"equipo\s*[:=]?\s*['\"]?([a-zA-Z0-9_\-]+)['\"]?", texto)
+    equipos_validos = ["omega", "alfa", "beta", "delta"]
+
+    # Detectar: "equipo <nombre>"
+    equipo_match = re.search(r"\bequipo\s+([a-zA-Z0-9_\-]+)\b", texto)
     if equipo_match:
-        nombre_equipo = equipo_match.group(1).lower()
-        if nombre_equipo not in ["agrupados", "todos", "completo", "usar", "usando"]:
-            plan["filtros"]["equipo"] = nombre_equipo
+        posible_equipo = equipo_match.group(1).lower()
+
+        # Solo aceptar si está dentro de los equipos válidos
+        if posible_equipo in equipos_validos:
+            plan["filtros"]["equipo"] = posible_equipo
         else:
-            # Si el usuario quiere todos/agrupados, eliminamos el filtro previo
-            plan["filtros"].pop("equipo", None)
-            
-    persona = entidades_raw.get("persona") or entidades_raw.get("nombre")
+            # Ignorar coincidencias no válidas (score, seguimiento, etc.)
+            logger.info(f"Ignorando coincidencia de equipo no válida: '{posible_equipo}'")
     if persona:
         if isinstance(persona, list):
             persona = persona[0]
