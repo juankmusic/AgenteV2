@@ -1,6 +1,6 @@
 # core/ai_core/structured_action_extractor.py
 import re
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 # Mapeo de keywords a tablas (extensible)
 TABLE_KEYWORDS = {
@@ -10,6 +10,26 @@ TABLE_KEYWORDS = {
     "docentes": "competencia_docente"
 }
 
+# Regex básicos
+EMAIL_REGEX = r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+"
+ID_REGEX = r"\b\d{3,10}\b"
+# Nombres: hasta 2 palabras, letras y vocales con tilde, aceptamos punto/guion opcional en nombres
+NAME_WORD = r"[A-Za-zÁÉÍÓÚÑáéíóúñ]+(?:[.\-]?[A-Za-zÁÉÍÓÚÑáéíóúñ]+)?"
+NAME_REGEX = rf"\b{NAME_WORD}(?:\s+{NAME_WORD})?\b"
+
+# Separadores para dividir múltiples usuarios en la frase
+SPLIT_SEPARATORS = r",|\band\b|\by\b|\btambién\b|\bademás\b|;"
+
+# Patrones para buscar "usuario ... (con|nivel|iluo) N"
+PAIR_PATTERN = re.compile(
+    rf"(?P<user>{EMAIL_REGEX}|{ID_REGEX}|{NAME_REGEX})\s*(?:,|\(|\-|:)?\s*(?:con\s*)?(?:nivel|iluo)\s*[:\-]?\s*(?P<iluo>\d)\b",
+    flags=re.IGNORECASE
+)
+
+# Patrones para detectar ILUO independiente si viene antes/ después
+ILUO_PATTERN = re.compile(r"(?:iluo|nivel)\s*[:\-]?\s*(\d)\b", flags=re.IGNORECASE)
+
+
 def _find_table(text: str) -> Optional[str]:
     t = text.lower()
     for kw, table in TABLE_KEYWORDS.items():
@@ -17,65 +37,152 @@ def _find_table(text: str) -> Optional[str]:
             return table
     return None
 
-def _find_iluo(text: str) -> Optional[int]:
-    t = text.lower()
-    m = re.search(r"(iluo|nivel)\s*[:\-]?\s*(\d+)\b", t)
-    if m:
-        try:
-            return int(m.group(2))
-        except:
-            return None
-    # catch "con nivel 3", "nivel 3"
-    m2 = re.search(r"\bnivel\s+(\d)\b", t)
-    if m2:
-        return int(m2.group(1))
-    return None
 
-def _find_user_identifier(text: str) -> Optional[str]:
+def _split_to_segments(text: str) -> List[str]:
     """
-    Intenta capturar un correo, un id numérico o un nombre (lo que venga).
-    Prioridad: correo > id numeric > nombre completo (hasta 'con'/'en'/'con nivel')
+    Divide correctamente las frases con múltiples usuarios.
+    Evita doble normalización y realiza un único split robusto.
     """
-    t = text.strip()
-    # correo
-    m_email = re.search(r"([a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+)", t)
+    # Usamos un único patrón que captura todos los conectores
+    segments = re.split(r"\s*(?:,|;|\by\b|\band\b|\btambién\b|\bademás\b)\s*", text, flags=re.IGNORECASE)
+
+    # Limpiar resultados vacíos o conectores solos
+    cleaned = [s.strip() for s in segments if s.strip()]
+    return cleaned
+
+
+
+def _extract_from_segment(seg: str) -> Optional[Dict[str, Any]]:
+    """
+    Extrae (usuario_identificador, iluo) de un segmento.
+    Prioridad de identificación:
+      - email
+      - id numérico
+      - nombre (1 o 2 palabras)
+    """
+    seg = seg.strip()
+
+    # 1) Buscar pares con pattern robusto (usuario seguido de 'nivel/iluo N')
+    m_pair = PAIR_PATTERN.search(seg)
+    if m_pair:
+        user = m_pair.group("user").strip()
+        iluo = int(m_pair.group("iluo"))
+        return {"identificador": user, "iluo": iluo}
+
+    # 2) Si no hay par directo, intentar extraer email primero
+    m_email = re.search(EMAIL_REGEX, seg)
     if m_email:
-        return m_email.group(1).strip()
+        user = m_email.group(0)
+        # buscar iluo en el segmento
+        m_il = ILUO_PATTERN.search(seg)
+        if m_il:
+            return {"identificador": user, "iluo": int(m_il.group(1))}
+        return {"identificador": user, "iluo": None}
 
-    # id numérico (ej: usuario 123, id 45)
-    m_id = re.search(r"\b(?:id|usuario|uid)\s*[:#]?\s*(\d{1,8})\b", t.lower())
+    # 3) Buscar id numérico
+    m_id = re.search(ID_REGEX, seg)
     if m_id:
-        return m_id.group(1).strip()
+        user = m_id.group(0)
+        m_il = ILUO_PATTERN.search(seg)
+        if m_il:
+            return {"identificador": user, "iluo": int(m_il.group(1))}
+        return {"identificador": user, "iluo": None}
 
-    # nombre heurístico: "evaluar a Juan Perez" o "evaluar Juan Perez"
-    m_name = re.search(r"(?:evaluar|calificar|asignar|registrar)\s+(?:a\s+)?([A-ZÁÉÍÓÚÑa-záéíóúñ0-9\.\_\- ]{3,80})", t, re.IGNORECASE)
+    # 4) Buscar nombre (1 o 2 palabras)
+    # Intentamos encontrar la primer match que no sea palabra reservada
+    m_name = re.search(NAME_REGEX, seg)
     if m_name:
-        name = m_name.group(1).strip()
-        # truncate if trailing keywords
-        name = re.split(r"\b(en|con|con nivel|nivel|en competencias|en competencia)\b", name, flags=re.IGNORECASE)[0].strip()
-        return name
+        # Evitar capturar palabras como "evaluar", "competencias", etc.
+        candidate = m_name.group(0).strip()
+        # si el candidato es muy genérico, descartar
+        if candidate.lower() not in {"evaluar", "evaluar:", "competencias", "competencias:"}:
+            m_il = ILUO_PATTERN.search(seg)
+            if m_il:
+                return {"identificador": candidate, "iluo": int(m_il.group(1))}
+            return {"identificador": candidate, "iluo": None}
 
     return None
+
+
+def _fill_missing_iluo_by_context(segments: List[Dict[str, Any]], text: str) -> List[Dict[str, Any]]:
+    """
+    Si algún segmento no incluye iluo explícito, tratamos de asignarle un iluo
+    global de contexto si existe (por ejemplo 'con nivel 2' al final de la frase),
+    o dejamos None para que el caller pida aclaración.
+    """
+    # buscar posibles iluo globales (ej: "con nivel 2 para todos")
+    global_il_match = ILUO_PATTERN.search(text)
+    global_il = int(global_il_match.group(1)) if global_il_match else None
+
+    for seg in segments:
+        if seg["iluo"] is None and global_il is not None:
+            seg["iluo"] = global_il
+    return segments
+
 
 def extract_structured_action(text: str) -> Optional[Dict[str, Any]]:
     """
-    Si detecta una intención clara de 'insertar evaluación', devuelve:
-    {
-        "action": "insert_evaluation",
-        "target_table": "competencia_transversales" | "competencia_docente",
-        "usuario_identificador": "correo|id|nombre",
-        "iluo": 3
-    }
+    Extrae acción estructurada. Soporta:
+      - Un solo usuario con su ILUO
+      - Múltiples usuarios separados por comas/ conectores con ILUO individual
+    Salida:
+    - Si se detecta 1 usuario: action = "insert_evaluation", keys: target_table, usuario_identificador, iluo
+    - Si se detectan varios: action = "insert_evaluation_multi", keys: target_table, usuarios: [{identificador, iluo}, ...]
     """
-    table = _find_table(text)
-    iluo = _find_iluo(text)
-    user = _find_user_identifier(text)
+    if not text or not text.strip():
+        return None
 
-    if table and iluo and user:
+    table = _find_table(text)
+    if not table:
+        return None
+
+    # 1) Dividir la parte relevante de la oración en segmentos
+    segments = _split_to_segments(text)
+
+    extracted = []
+    for seg in segments:
+        res = _extract_from_segment(seg)
+        if res:
+            extracted.append(res)
+
+    # Si no extrajimos nada con split, intentar extraer pares en toda la frase
+    if not extracted:
+        # intentar pares globales
+        matches = PAIR_PATTERN.findall(text)
+        for m in matches:
+            user = m[0].strip()
+            iluo = int(m[1])
+            extracted.append({"identificador": user, "iluo": iluo})
+
+    if not extracted:
+        return None
+
+    # Rellenar iluos faltantes por un iluo global si existe
+    extracted = _fill_missing_iluo_by_context(extracted, text)
+
+    # Normalizar: quitar duplicados por identificador (manteniendo el primero)
+    seen = set()
+    normalized = []
+    for e in extracted:
+        key = e["identificador"].lower()
+        if key not in seen:
+            seen.add(key)
+            normalized.append({"identificador": e["identificador"], "iluo": e["iluo"]})
+    extracted = normalized
+
+    # Si solo hay uno, devolver la forma simple (retrocompatibilidad)
+    if len(extracted) == 1:
+        u = extracted[0]
         return {
             "action": "insert_evaluation",
             "target_table": table,
-            "usuario_identificador": user,
-            "iluo": iluo
+            "usuario_identificador": u["identificador"],
+            "iluo": u["iluo"]
         }
-    return None
+
+    # Si hay varios, devolver list
+    return {
+        "action": "insert_evaluation_multi",
+        "target_table": table,
+        "usuarios": extracted  # lista de {identificador, iluo}
+    }

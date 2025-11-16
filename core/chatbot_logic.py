@@ -30,6 +30,7 @@ from core.errors.error_manager import error_log
 from core.ai_core.structured_action_extractor import extract_structured_action
 from core.ai_core.pending_actions_manager import PendingActionsManager
 from core.ai_core.preview_builder import build_competencias_preview
+from core.ai_core.preview_builder import build_multiuser_summary_item, build_multiuser_preview
 
 
 # <<< MODIFICACIÓN >>>
@@ -184,149 +185,326 @@ def deepseek_chat(session_id, question, context=None, history=None):
     if pending:
         user_msg = question.strip().lower()
 
-        # CONFIRMAR
-        if user_msg in ["si", "sí", "yes", "confirmar", "confirmo"]:
-            try:
-                payload = pending
-                conn = connect_db()
-                if not conn:
-                    PENDING_MANAGER.clear(session_id)
-                    return "❌ No pude conectar a la base de datos para guardar la evaluación."
-
-                target_table = payload["target_table"]
-                usuario_id = int(payload["usuario_db_id"])
-                competencias = payload["competencias"]
-
-                if target_table == "competencia_transversales":
-                    insert_table = "respuesta_competencia_transversales"
-                    fk = "id_competencia_transversal"
-                elif target_table == "competencia_docente":
-                    insert_table = "respuesta_competencia_docente"
-                    fk = "id_competencia_docente"
-                else:
-                    PENDING_MANAGER.clear(session_id)
-                    return f"❌ Tabla objetivo no soportada: {target_table}"
-
-                with conn.cursor() as cur:
-                    sql = f"""
-                        INSERT INTO {insert_table} (id_usuario, {fk}, fecha_respuesta)
-                        VALUES (%s, %s, CURRENT_DATE)
-                    """
-                    for comp in competencias:
-                        cur.execute(sql, (usuario_id, comp["id"]))
-                    conn.commit()
-                
-                PENDING_MANAGER.clear(session_id)
-                return f"✅ Se han registrado {len(competencias)} evaluaciones en {insert_table}."
-
-            except Exception as e:
-                print("❌ Error al insertar evaluación:", e)
-                return "❌ Ocurrió un error al guardar la evaluación. Revisa los logs."
-
-        # CANCELAR
-        elif user_msg in ["no", "cancelar", "n"]:
+        # ------------------------
+        # CANCELACIÓN
+        # ------------------------
+        if user_msg in ["no", "cancelar", "n"]:
             PENDING_MANAGER.clear(session_id)
             return "❌ Inserción cancelada. No se realizaron cambios."
 
-        # Espera respuesta válida
-        else:
-            return "Tienes una acción pendiente. Responde **Sí** para confirmar o **No** para cancelar."
+        # ------------------------
+        # CONFIRMAR INSERTAR
+        # ------------------------
+        if user_msg in ["si", "sí", "yes", "confirmo", "confirmar"]:
 
+            conn = connect_db()
+            if not conn:
+                PENDING_MANAGER.clear(session_id)
+                return "❌ No pude conectar a la base de datos para guardar la evaluación."
+
+            try:
+                with conn.cursor() as cur:
+
+                    # --------------------------
+                    # CASO A: UN SOLO USUARIO
+                    # --------------------------
+                    if pending.get("is_multi") is False:
+
+                        target_table = pending["target_table"]
+                        usuario_id = pending["usuario_db_id"]
+                        competencias = pending["competencias"]
+
+                        # Selección de tabla
+                        if target_table == "competencia_transversales":
+                            insert_table = "respuesta_competencia_transversales"
+                            fk = "id_competencia_transversal"
+                        else:
+                            insert_table = "respuesta_competencia_docente"
+                            fk = "id_competencia_docente"
+
+                        sql = f"""
+                            INSERT INTO {insert_table} (id_usuario, {fk}, fecha_respuesta)
+                            VALUES (%s, %s, CURRENT_DATE)
+                        """
+
+                        for comp in competencias:
+                            cur.execute(sql, (usuario_id, comp["id"]))
+
+                        conn.commit()
+                        PENDING_MANAGER.clear(session_id)
+
+                        return (
+                            f"✅ Se registraron {len(competencias)} "
+                            f"competencias para el usuario **{pending['usuario_info']['nombre']}**."
+                        )
+
+                    # --------------------------
+                    # CASO B: MULTI-USUARIO
+                    # --------------------------
+                    if pending.get("is_multi") is True:
+
+                        target_table = pending["target_table"]
+
+                        if target_table == "competencia_transversales":
+                            insert_table = "respuesta_competencia_transversales"
+                            fk = "id_competencia_transversal"
+                        else:
+                            insert_table = "respuesta_competencia_docente"
+                            fk = "id_competencia_docente"
+
+                        sql = f"""
+                            INSERT INTO {insert_table} (id_usuario, {fk}, fecha_respuesta)
+                            VALUES (%s, %s, CURRENT_DATE)
+                        """
+
+                        total_insertadas = 0
+                        resumen = "<h3>✅ Inserciones completadas:</h3><ul>"
+
+                        for item in pending["usuarios"]:
+
+                            u_id = item["usuario_db_id"]
+                            u_nombre = item["usuario_info"]["nombre"]
+                            comps = item["competencias"]
+
+                            for comp in comps:
+                                cur.execute(sql, (u_id, comp["id"]))
+                                total_insertadas += 1
+
+                            resumen += f"<li><strong>{u_nombre}</strong>: {len(comps)} competencias</li>"
+
+                        resumen += "</ul>"
+
+                        conn.commit()
+                        PENDING_MANAGER.clear(session_id)
+
+                        return (
+                            resumen +
+                            f"<p><strong>Total de competencias registradas:</strong> {total_insertadas}</p>"
+                        )
+
+                # Si todo sale bien
+            except Exception as e:
+                print("❌ Error al insertar evaluación:", e)
+                return "❌ Ocurrió un error al guardar la evaluación."
+
+        # ------------------------
+        # RESPUESTA INVÁLIDA
+        # ------------------------
+        return "Tienes una acción pendiente. Responde **Sí** para confirmar o **No** para cancelar."
     # =======================================================
     # 🔥 NUEVO FLUJO: DETECCIÓN DE SOLICITUD ESTRUCTURADA DE INSERCIÓN
     # =======================================================
     structured = extract_structured_action(question)
 
+    # === CORRECCIÓN CRÍTICA ===
+    # Evita que se active el modo inserción cuando NO hay usuarios reales
+    valid_insert = False
+
     if structured:
-        target_table = structured["target_table"]
-        usuario_identifier = structured["usuario_identificador"]
-        iluo_level = structured["iluo"]
+        if structured.get("action") == "insert_evaluation":
+            if structured.get("usuario_identificador") and structured.get("iluo") is not None:
+                valid_insert = True
 
-        conn = connect_db()
-        if not conn:
-            return "❌ No pude conectar a la base de datos."
+        elif structured.get("action") == "insert_evaluation_multi":
+            usuarios = structured.get("usuarios", [])
+            # válido solo si existe al menos un usuario con ILUO real
+            if any(u.get("iluo") is not None for u in usuarios):
+                valid_insert = True
 
-        try:
-            with conn.cursor() as cur:
+    # ❌ Si NO es una inserción válida, eliminamos structured
+    if not valid_insert:
+        structured = None
 
-                # ---- Buscar usuario ----
-                if "@" in usuario_identifier:
-                    cur.execute("SELECT id, nombre, correo FROM usuario WHERE correo ILIKE %s LIMIT 1;",
-                                (f"%{usuario_identifier}%",))
-                    u = cur.fetchone()
-                elif usuario_identifier.isdigit():
-                    cur.execute("SELECT id, nombre, correo FROM usuario WHERE id = %s;",
-                                (int(usuario_identifier),))
-                    u = cur.fetchone()
-                else:
-                    cur.execute("SELECT id, nombre, correo FROM usuario WHERE nombre ILIKE %s LIMIT 5;",
-                                (f"%{usuario_identifier}%",))
-                    usuarios = cur.fetchall()
+    # =======================================================
+    # FLUJO ORIGINAL DE INSERCIÓN
+    # =======================================================
+    if structured:
 
-                    if len(usuarios) == 0:
-                        return f"❌ No encontré ningún usuario llamado '{usuario_identifier}'."
+        # --------------------------
+        # Caso A: un solo usuario
+        # --------------------------
+        if structured["action"] == "insert_evaluation":
+            target_table = structured["target_table"]
+            usuario_identifier = structured["usuario_identificador"]
+            iluo_level = structured["iluo"]
 
-                    if len(usuarios) > 1:
-                        listado = "\n".join([f"- ID {r[0]} | {r[1]} | {r[2]}" for r in usuarios])
-                        return (
-                            "Encontré varias coincidencias, especifica con correo o ID:\n" +
-                            listado
-                        )
+            conn = connect_db()
+            if not conn:
+                return "❌ No pude conectar a la base de datos."
 
-                    u = usuarios[0]
+            try:
+                with conn.cursor() as cur:
 
-                if not u:
-                    return f"❌ No se encontró el usuario '{usuario_identifier}'."
+                    # ---- Buscar usuario ----
+                    if "@" in usuario_identifier:
+                        cur.execute("SELECT id, nombre, correo FROM usuario WHERE correo ILIKE %s LIMIT 1;",
+                                    (f"%{usuario_identifier}%",))
+                        u = cur.fetchone()
+                    elif usuario_identifier.isdigit():
+                        cur.execute("SELECT id, nombre, correo FROM usuario WHERE id = %s;",
+                                    (int(usuario_identifier),))
+                        u = cur.fetchone()
+                    else:
+                        cur.execute("SELECT id, nombre, correo FROM usuario WHERE nombre ILIKE %s LIMIT 5;",
+                                    (f"%{usuario_identifier}%",))
+                        usuarios = cur.fetchall()
 
-                usuario_info = {
-                    "id": u[0],
-                    "nombre": u[1],
-                    "correo": u[2]
-                }
+                        if len(usuarios) == 0:
+                            return f"❌ No encontré ningún usuario llamado '{usuario_identifier}'."
 
-                # ---- Buscar competencias por ILUO ----
-                sql_comp = f"""
-                    SELECT c.id,
-                        p.texto AS pregunta_nombre,
-                        r.texto AS respuesta_nombre,
-                        c.id_iluo
-                    FROM {target_table} c
-                    INNER JOIN pregunta p ON p.id = c.id_pregunta
-                    INNER JOIN respuesta r ON r.id = c.id_respuesta
-                    WHERE c.id_iluo = %s
-                    ORDER BY c.id;
-                """
-                cur.execute(sql_comp, (iluo_level,))
-                rows = cur.fetchall()
+                        if len(usuarios) > 1:
+                            listado = "\n".join([f"- ID {r[0]} | {r[1]} | {r[2]}" for r in usuarios])
+                            return (
+                                "Encontré varias coincidencias, especifica con correo o ID:\n" +
+                                listado
+                            )
+                        u = usuarios[0]
 
-                competencias = [
-                    {
-                        "id": r[0],                        # Oculto en previsualización, pero necesario para insertar
-                        "pregunta": r[1],
-                        "respuesta": r[2],
-                        "id_iluo": r[3]
-                    } for r in rows
-                ]
+                    if not u:
+                        return f"❌ No se encontró el usuario '{usuario_identifier}'."
 
-                # ---- Crear previsualización ----
-                preview = build_competencias_preview(usuario_info, competencias, target_table, iluo_level)
+                    usuario_info = {"id": u[0], "nombre": u[1], "correo": u[2]}
 
-                # ---- Guardar acción pendiente ----
-                PENDING_MANAGER.save(session_id, {
-                    "target_table": target_table,
-                    "usuario_db_id": usuario_info["id"],
-                    "usuario_info": usuario_info,
-                    "iluo": iluo_level,
-                    "competencias": competencias
-                })
+                    # ---- Buscar competencias por ILUO ----
+                    sql_comp = f"""
+                        SELECT c.id,
+                            p.texto AS pregunta_nombre,
+                            r.texto AS respuesta_nombre,
+                            c.id_iluo
+                        FROM {target_table} c
+                        INNER JOIN pregunta p ON p.id = c.id_pregunta
+                        INNER JOIN respuesta r ON r.id = c.id_respuesta
+                        WHERE c.id_iluo = %s
+                        ORDER BY c.id;
+                    """
+                    cur.execute(sql_comp, (iluo_level,))
+                    rows = cur.fetchall()
 
-                return preview
+                    competencias = [
+                        {
+                            "id": r[0],
+                            "pregunta": r[1],
+                            "respuesta": r[2],
+                            "id_iluo": r[3]
+                        } for r in rows
+                    ]
 
-        except Exception as e:
-            print("❌ Error en inserción estructurada:", e)
-            return "❌ Hubo un error procesando tu solicitud."
-        finally:
-            conn.close()
+                    # ---- Generar previsualización ----
+                    preview = build_competencias_preview(usuario_info, competencias, target_table, iluo_level)
+
+                    # ---- Guardar acción pendiente ----
+                    PENDING_MANAGER.save(session_id, {
+                        "is_multi": False,
+                        "target_table": target_table,
+                        "usuario_db_id": usuario_info["id"],
+                        "usuario_info": usuario_info,
+                        "iluo": iluo_level,
+                        "competencias": competencias
+                    })
+
+                    return preview
+
+            except Exception as e:
+                print("❌ Error en inserción estructurada:", e)
+                return "❌ Hubo un error procesando tu solicitud."
+            finally:
+                conn.close()
+
+        # --------------------------
+        # Caso B: MULTI-USUARIO
+        # --------------------------
+        if structured["action"] == "insert_evaluation_multi":
+
+            target_table = structured["target_table"]
+            usuarios_list = structured["usuarios"]
+
+            conn = connect_db()
+            if not conn:
+                return "❌ No pude conectar a la base de datos."
+
+            usuarios_preview = []
+            pending_payload = {
+                "is_multi": True,
+                "target_table": target_table,
+                "usuarios": []
+            }
+
+            try:
+                with conn.cursor() as cur:
+                    for uitem in usuarios_list:
+
+                        ident = uitem["identificador"]
+                        iluo_level = uitem["iluo"]
+
+                        # ---- Resolver usuario ----
+                        if "@" in ident:
+                            cur.execute("SELECT id, nombre, correo FROM usuario WHERE correo ILIKE %s LIMIT 1;",
+                                        (f"%{ident}%",))
+                            u = cur.fetchone()
+                        elif ident.isdigit():
+                            cur.execute("SELECT id, nombre, correo FROM usuario WHERE id = %s;",
+                                        (int(ident),))
+                            u = cur.fetchone()
+                        else:
+                            cur.execute("SELECT id, nombre, correo FROM usuario WHERE nombre ILIKE %s LIMIT 5;",
+                                        (f"%{ident}%",))
+                            matches = cur.fetchall()
+                            if len(matches) == 0:
+                                continue  # usuario no encontrado
+                            if len(matches) > 1:
+                                continue  # nombre ambiguo
+                            u = matches[0]
+
+                        if not u:
+                            continue  # seguridad
+
+                        usuario_info = {"id": u[0], "nombre": u[1], "correo": u[2]}
+
+                        # ---- Competencias por ILUO ----
+                        sql_comp = f"""
+                            SELECT c.id, p.texto, r.texto, c.id_iluo
+                            FROM {target_table} c
+                            INNER JOIN pregunta p ON p.id = c.id_pregunta
+                            INNER JOIN respuesta r ON r.id = c.id_respuesta
+                            WHERE c.id_iluo = %s
+                            ORDER BY c.id;
+                        """
+                        cur.execute(sql_comp, (iluo_level,))
+                        rows = cur.fetchall()
+
+                        competencias = [
+                            {"id": r[0], "pregunta": r[1], "respuesta": r[2], "id_iluo": r[3]}
+                            for r in rows
+                        ]
+
+                        # ---- Agregar a lista para preview ----
+                        usuarios_preview.append({
+                            "usuario_info": usuario_info,
+                            "competencias": competencias,
+                            "iluo": iluo_level
+                        })
+
+                        # ---- Agregar a pending ----
+                        pending_payload["usuarios"].append({
+                            "usuario_db_id": usuario_info["id"],
+                            "usuario_info": usuario_info,
+                            "iluo": iluo_level,
+                            "competencias": competencias
+                        })
+
+                # ---- Generar preview multiusuario completo ----
+                previews_html = build_multiuser_preview(usuarios_preview, target_table)
+
+                # ---- Guardar pending ----
+                PENDING_MANAGER.save(session_id, pending_payload)
+
+                return previews_html
+
+            except Exception as e:
+                print("❌ Error multiusuario:", e)
+                return "❌ Hubo un error procesando la solicitud múltiple."
+            finally:
+                conn.close()
 
     
     # --- PROMPT DEL SISTEMA (IDÉNTICO) ---
