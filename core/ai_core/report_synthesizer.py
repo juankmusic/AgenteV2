@@ -1,3 +1,4 @@
+
 # core/ai_core/report_synthesizer.py
 
 import os
@@ -91,24 +92,24 @@ def synthesize_from_results(results: pd.DataFrame, user_input: str) -> str:
     # Limitar muestra para enviar al LLM
     sample = _limit_and_stringify(results, max_rows=5)
     data_sample = sample.to_dict(orient="records")
-    today = datetime.now().strftime("%d/%m/%Y %H:%M")
 
     # Construir prompt controlado (omito por brevedad, es el mismo código)
     prompt = f"""
-    Eres un analista cognitivo que genera informes concisos y confidenciales.
-    Tu tarea es describir los datos sin agregar ejemplos ni suposiciones.
+    Eres un analista de datos claro, conciso y técnico. Analiza los datos proporcionados y genera un informe ejecutivo en español.
     Si un valor no tiene un significado textual (como IDs numéricos), no lo interpretes ni inventes.
     El usuario pidió: "{user_input}"
 
-    Solo tienes una muestra limitada de los datos (para contexto), no muestres tablas ni datos sensibles:
+    Tienes una muestra de los datos (solo para referencia):, no muestres tablas ni datos sensibles:
     {json.dumps(data_sample, ensure_ascii=False, indent=2)}
-
-    Instrucciones:
-    - Redacta un informe ejecutivo y analítico en español.
-    - No incluyas tablas ni listados de datos.
-    - No muestres ni reconstruyas información sensible (correos, contraseñas, etc.).
-    - No sugieras gráficos si el usuario no los pidió explícitamente.
-    - Evita firmas o placeholders como [Su Nombre] o [Fecha Actual]; incluye la fecha real.
+    
+    Reglas estrictas:
+    - No generes encabezados, títulos, secciones ni formato de informe.
+    - NO escribas palabras como "Informe", "Ejecutivo", "Resumen", "Fecha", "Conclusión".
+    - No inventes fechas.
+    - No agregues narrativa ejecutiva, solo lo necesario para responder.
+    - Una o dos frases máximo.
+    - No muestres tablas.
+    - No interpretes datos sensibles.
     """
     try:
         response = openai_client.chat.completions.create(
@@ -117,15 +118,12 @@ def synthesize_from_results(results: pd.DataFrame, user_input: str) -> str:
                 {"role": "system", "content": "Eres un generador de informes profesional. Responde en español con tono analítico y claro."},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.4
+            temperature=0.2
         )
         analysis = response.choices[0].message.content.strip()
-        header = f"### Informe Analítico Automatizado\n**Fecha de generación:** {today}\n\n"
-        return header + analysis
+        return  analysis
     except Exception as e:
-        # 🛑 Corregido: Usar clase CSS para errores en lugar de estilo en línea fijo
-        return f"<p class='error-message'>❌ Error generando informe: {e}</p>"
-
+        return f"<p class='error-message'>❌ Error generando respuesta: {e}</p>"
 def generate_table_html(results: pd.DataFrame, user_input: str) -> str:
     # ... (Función sin cambios, enfocada solo en la tabla HTML)
     if not _user_wants_table(user_input):
@@ -169,7 +167,7 @@ def generate_visualization(results: pd.DataFrame, user_input: str, chart_type: s
 
     try:
         if results is None or results.empty:
-            return "<p>⚠️ No hay datos para graficar.</p>"
+            return "<div class='aigr-card' style='background: #fff3cd; border-left: 4px solid #ffc107; padding: 15px;'><strong>⚠️ Sin datos</strong><p>La consulta no devolvió resultados para graficar. Intenta ajustar los filtros.</p></div>"
 
         numeric_cols = results.select_dtypes(include=["number"]).columns
         categorical_cols = results.select_dtypes(include=["object", "category"]).columns

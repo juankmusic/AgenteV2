@@ -38,23 +38,6 @@
     ],
     "foreign_keys": {}
   },
-  "categoria": {
-    "columns": {
-      "id": "integer",
-      "nombre": "character varying",
-      "descripcion": "character varying"
-    },
-    "primary_key": [
-      "id"
-    ],
-    "foreign_keys": {},
-    "description": "Define categorías o grupos para clasificar cursos, recursos u otros elementos.",
-    "synonyms": [
-      "grupo",
-      "tipo",
-      "clase"
-    ]
-  },
   "chatbot_logs": {
     "columns": {
       "id": "integer",
@@ -67,6 +50,50 @@
       "id"
     ],
     "foreign_keys": {}
+  },
+  "competencia_docente": {
+    "columns": {
+      "id": "integer",
+      "id_pregunta": "integer",
+      "id_respuesta": "integer",
+      "id_iluo": "integer"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "id_pregunta": {
+        "references": "pregunta.id"
+      },
+      "id_respuesta": {
+        "references": "respuesta.id"
+      },
+      "id_iluo": {
+        "references": "iluo.id"
+      }
+    }
+  },
+  "competencia_transversales": {
+    "columns": {
+      "id": "integer",
+      "id_pregunta": "integer",
+      "id_respuesta": "integer",
+      "id_iluo": "integer"
+    },
+    "primary_key": [
+      "id"
+    ],
+    "foreign_keys": {
+      "id_pregunta": {
+        "references": "pregunta.id"
+      },
+      "id_respuesta": {
+        "references": "respuesta.id"
+      },
+      "id_iluo": {
+        "references": "iluo.id"
+      }
+    }
   },
   "configuracion_usuario": {
     "columns": {
@@ -107,32 +134,6 @@
       "id"
     ],
     "foreign_keys": {}
-  },
-  "evaluacion": {
-    "columns": {
-      "id": "integer",
-      "fecha": "date",
-      "usuario_id": "integer",
-      "evaluador_id": "integer"
-    },
-    "primary_key": [
-      "id"
-    ],
-    "foreign_keys": {
-      "evaluador_id": {
-        "references": "usuario.id"
-      },
-      "usuario_id": {
-        "references": "usuario.id"
-      }
-    },
-    "description": "Guarda las evaluaciones de desempeño o retroalimentaciones hechas a los usuarios.",
-    "synonyms": [
-      "desempeño",
-      "valoración",
-      "feedback",
-      "revisión"
-    ]
   },
   "iluo": {
     "columns": {
@@ -223,12 +224,7 @@
       "id": "integer",
       "texto": "character varying",
       "origen": "character varying",
-      "pregunta_id": "integer",
-      "ILUO": "character varying",
-      "valor_respuesta": "integer",
-      "descripcion_iluo": "character varying",
-      "ruta_desarrollo": "character varying",
-      "ruta_autodesarrollo": "character varying"
+      "pregunta_id": "integer"
     },
     "primary_key": [
       "id"
@@ -276,9 +272,7 @@
     "columns": {
       "id": "integer",
       "id_usuario": "integer",
-      "id_pregunta": "integer",
-      "id_respuesta": "integer",
-      "id_iluo": "integer",
+      "id_competencia_docente": "integer",
       "fecha_respuesta": "date"
     },
     "primary_key": [
@@ -288,14 +282,8 @@
       "id_usuario": {
         "references": "usuario.id"
       },
-      "id_pregunta": {
-        "references": "pregunta.id"
-      },
-      "id_respuesta": {
-        "references": "respuesta.id"
-      },
-      "id_iluo": {
-        "references": "iluo.id"
+      "id_competencia_docente": {
+        "references": "competencia_docente.id"
       }
     }
   },
@@ -303,9 +291,7 @@
     "columns": {
       "id": "integer",
       "id_usuario": "integer",
-      "id_pregunta": "integer",
-      "id_respuesta": "integer",
-      "id_iluo": "integer",
+      "id_competencia_transversal": "integer",
       "fecha_respuesta": "date"
     },
     "primary_key": [
@@ -315,14 +301,8 @@
       "id_usuario": {
         "references": "usuario.id"
       },
-      "id_pregunta": {
-        "references": "pregunta.id"
-      },
-      "id_respuesta": {
-        "references": "respuesta.id"
-      },
-      "id_iluo": {
-        "references": "iluo.id"
+      "id_competencia_transversal": {
+        "references": "competencia_transversales.id"
       }
     }
   },
