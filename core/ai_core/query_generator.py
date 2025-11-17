@@ -5,8 +5,6 @@ import json
 from dotenv import load_dotenv
 from openai import OpenAI as OpenAIClient
 from db.connection import connect_db
-from core.errors.error_manager import handle_error # Importa el manejador de errores
-
 
 # ======================================================
 # CONFIGURACIÓN INICIAL
@@ -22,15 +20,16 @@ openai_client = OpenAIClient(api_key=OPENAI_API_KEY)
 def get_database_schema():
     """
     Recupera todas las tablas y columnas del esquema 'public' en PostgreSQL,
-    junto con las claves foráneas para que el modelo pueda generar consultas más completas.
+    junto con las claves foráneas y mapeo de columnas para validación.
     """
     schema = {}
+    columns_by_table = {}  # NUEVO: columnas por tabla para validación
     foreign_keys = []  # Asegúrate de definir esta variable fuera de la consulta
 
     conn = connect_db()
     if not conn:
         print("❌ No se pudo conectar a la base de datos.")
-        return schema, foreign_keys  # Cambié para devolver las claves foráneas también
+        return schema, columns_by_table, foreign_keys
 
     try:
         with conn.cursor() as cur:
@@ -49,6 +48,7 @@ def get_database_schema():
                     "columna": col,
                     "tipo": dtype
                 })
+                columns_by_table.setdefault(table, []).append(col)
             
             # Obtener relaciones entre tablas (clave foránea)
             cur.execute("""
@@ -69,18 +69,13 @@ def get_database_schema():
             foreign_keys = cur.fetchall()
 
         print(f"📚 Esquema con relaciones detectado: {len(schema)} tablas encontradas.")
-        return schema, foreign_keys  # Devuelve las claves foráneas también
+        return schema, columns_by_table, foreign_keys
 
-    # Si obtener el esquema falla, es un error de fondo.
-    # Lo registramos en la memoria global para que el agente "sepa"
-    # que algo falló, aunque no se lo mostremos al usuario aquí.
     except Exception as e:
-        print(f"❌ Error crítico obteniendo esquema: {e}")
-        handle_error(e) # Registra el error en la memoria global
-        return {}, []  # Mantiene el flujo de fallo
+        print(f"❌ Error obteniendo esquema: {e}")
+        return {}, {}, []
     finally:
         conn.close()
-
 
 # ======================================================
 # 2️⃣ FUNCIÓN: VALIDAR CONSULTAS SQL
@@ -97,9 +92,25 @@ def validate_sql(sql: str) -> bool:
     return True
 
 # ======================================================
-# 3️⃣ FUNCIÓN PRINCIPAL: GENERAR CONSULTA SQL
+# 3️⃣ FUNCIÓN: VALIDAR COLUMNAS EXISTENTES
 # ======================================================
-def generate_sql_with_openai(plan: dict, schema: dict, foreign_keys: list) -> dict:
+def validate_sql_columns(sql: str, columns_by_table: dict) -> bool:
+    """
+    Revisa que todas las columnas mencionadas en la consulta existan en su tabla correspondiente.
+    """
+    for table, cols in columns_by_table.items():
+        # Buscar columnas con patrón table.col
+        pattern = re.compile(rf"{table}\.(\w+)", re.IGNORECASE)
+        for col in pattern.findall(sql):
+            if col not in cols:
+                print(f"❌ Columna inválida detectada: {table}.{col}")
+                return False
+    return True
+
+# ======================================================
+# 4️⃣ FUNCIÓN PRINCIPAL: GENERAR CONSULTA SQL
+# ======================================================
+def generate_sql_with_openai(plan: dict, schema: dict, foreign_keys: list, columns_by_table: dict) -> dict:
     """
     Usa un modelo de lenguaje para generar una consulta SQL válida y segura
     basada en el plan de acción del agente y el esquema real de la base.
@@ -112,6 +123,7 @@ def generate_sql_with_openai(plan: dict, schema: dict, foreign_keys: list) -> di
 
     schema_json = json.dumps(filtered_schema, ensure_ascii=False, indent=2)
     foreign_keys_json = json.dumps(foreign_keys, ensure_ascii=False, indent=2)
+    columns_json = json.dumps(columns_by_table, ensure_ascii=False, indent=2)
 
     prompt = f"""
     Eres un generador experto de SQL para PostgreSQL. Tu tarea es generar consultas SQL válidas y seguras basadas en los siguientes datos:
@@ -125,12 +137,21 @@ def generate_sql_with_openai(plan: dict, schema: dict, foreign_keys: list) -> di
     3️⃣ **Relaciones importantes**: 
     A continuación se listan las claves foráneas que puedes utilizar para realizar los `JOIN` entre tablas:
     {foreign_keys_json}
+    
+    - Estas son las columnas disponibles por tabla:
+    {columns_json}
+    - Solo puedes usar estas columnas. No inventes nombres.
 
     4️⃣ **Instrucciones**:
     - Debes utilizar las claves foráneas para realizar `JOIN` entre las tablas relacionadas cuando sea necesario.
     - Si el plan menciona una tabla o columna, interpreta el contexto semántico para saber qué tabla y qué columna utilizar.
     - Asegúrate de que la consulta sea **segura** y que no contenga comandos destructivos como `DROP`, `DELETE` sin `WHERE`, o `TRUNCATE`.
     - Genera una consulta que **respete las relaciones y restricciones de la base de datos**.
+    - Usa solo columnas que existen en el esquema provisto.
+    - Si necesitas un valor de otra tabla, realiza un JOIN usando las claves foráneas.
+    - No inventes nombres de columnas o tablas.
+    - Asegúrate de que la consulta sea segura y respete las relaciones y restricciones de la base de datos.
+    - La columna valor_respuesta NUNCA está en las tablas de respuestas. Está en la tabla iluo. Si quieres calcular promedios o usar ese valor, debes hacer JOIN con iluo usando id_iluo.
 
     Recuerda: nunca pidas datos al usuario, la información que necesitas está en la base de datos.
 
@@ -159,7 +180,6 @@ def generate_sql_with_openai(plan: dict, schema: dict, foreign_keys: list) -> di
                       .strip()
         )
 
-        # Intentar parsear el JSON
         result = json.loads(clean_output)
         sql = result.get("sql", "").strip()
 
@@ -167,21 +187,22 @@ def generate_sql_with_openai(plan: dict, schema: dict, foreign_keys: list) -> di
         if not validate_sql(sql):
             return {"sql": None, "descripcion": "Consulta rechazada por motivos de seguridad."}
 
+        # NUEVA VALIDACIÓN: columnas existentes
+        if not validate_sql_columns(sql, columns_by_table):
+            return {"sql": None, "descripcion": "Consulta usa columnas inexistentes."}
+
         print(f"✅ SQL generado:\n{sql}")
         return result
 
     except json.JSONDecodeError:
         print(f"❌ Error: la respuesta del modelo no es JSON válido.\nSalida cruda:\n{raw_output}")
         return {"sql": None, "descripcion": "Respuesta no JSON del modelo."}
-    # Otro error de fondo (ej. la API de OpenAI falló).
-    # Lo registramos en la memoria global.
     except Exception as e:
         print(f"❌ Error generando SQL: {e}")
-        handle_error(e) # Registra el error en la memoria global
         return {"sql": None, "descripcion": str(e)}
 
 # ======================================================
-# 4️⃣ FUNCIÓN: INTERFAZ PÚBLICA (MODIFICADA)
+# 5️⃣ FUNCIÓN: INTERFAZ PÚBLICA
 # ======================================================
 def generate_query_from_plan(plan: dict) -> dict:
     """
@@ -191,7 +212,7 @@ def generate_query_from_plan(plan: dict) -> dict:
     a partir del plan de acción del agente inteligente.
     """
     
-  
+    # 🛑 NUEVA LÓGICA: REUTILIZAR CONSULTA
     if plan.get("accion") == "reutilizar_consulta":
         previous_sql = plan.get("meta", {}).get("previous_sql")
         if previous_sql:
@@ -202,16 +223,14 @@ def generate_query_from_plan(plan: dict) -> dict:
             }
         else:
             print("⚠️ Acción 'reutilizar_consulta' detectada, pero sin SQL previo. Volviendo a generación normal.")
-            # Continúa al flujo normal si no hay SQL que reutilizar.
             
-
-    # Flujo normal de generación (si no se reutiliza)
-    schema, foreign_keys = get_database_schema()  # Ahora obtiene también las claves foráneas
+    # Flujo normal de generación
+    schema, columns_by_table, foreign_keys = get_database_schema()
     if not schema:
         print("⚠️ No se pudo obtener el esquema de la base de datos.")
         return {"sql": None, "descripcion": "Error al obtener el esquema."}
 
-    result = generate_sql_with_openai(plan, schema, foreign_keys)  # Pasa las claves foráneas también
+    result = generate_sql_with_openai(plan, schema, foreign_keys, columns_by_table)
 
     if result.get("sql"):
         print(f"📜 Consulta generada exitosamente.")

@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Agente Inteligente 2025</title>
+  <title>Agente Inteligente SGD</title>
   <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
@@ -142,6 +142,158 @@
       box-shadow: 0 4px 12px rgba(255, 107, 53, 0.3);
     }
 
+    /* Botón de información */
+    #info-btn {
+      position: fixed;
+      top: 20px;
+      bottom: 20px;
+      right: 10px;
+      width: 35px;
+      height: 35px;
+      border-radius: 50%;
+      background: var(--primary);
+      border: none;
+      color: white;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 12px rgba(255, 107, 53, 0.4);
+      transition: all 0.3s ease;
+      z-index: 1000;
+    }
+
+    #info-btn:hover {
+      background: var(--primary-hover);
+      transform: scale(1.1);
+      box-shadow: 0 6px 16px rgba(255, 107, 53, 0.5);
+    }
+
+    /* Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(4px);
+      z-index: 2000;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .modal-overlay.active {
+      display: flex;
+    }
+
+    .modal-content {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      width: 90%;
+      max-width: 600px;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+      animation: modalSlideIn 0.3s ease;
+    }
+
+    @keyframes modalSlideIn {
+      from {
+        opacity: 0;
+        transform: translateY(-20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .modal-header h2 {
+      margin: 0;
+      font-size: 1.5rem;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .modal-close {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      color: var(--text);
+      transition: all 0.3s ease;
+    }
+
+    .modal-close:hover {
+      background: var(--primary);
+      color: white;
+      border-color: var(--primary);
+    }
+
+    .modal-body {
+      padding: 24px;
+      color: var(--text);
+      line-height: 1.8;
+    }
+
+    .tutorial-section {
+      margin-bottom: 24px;
+    }
+
+    .tutorial-section h3 {
+      color: var(--primary);
+      font-size: 1.1rem;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .tutorial-section p {
+      margin: 8px 0;
+      color: var(--text);
+      opacity: 0.9;
+    }
+
+    .tutorial-section ul {
+      margin: 8px 0;
+      padding-left: 20px;
+    }
+
+    .tutorial-section li {
+      margin: 6px 0;
+      color: var(--text);
+      opacity: 0.85;
+    }
+
+    .feature-badge {
+      display: inline-block;
+      background: var(--card);
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 0.85rem;
+      margin: 4px;
+      border: 1px solid var(--border);
+    }
+
     /* Chat container */
     #chat-container {
       flex: 1;
@@ -198,36 +350,31 @@
       border-bottom-right-radius: 0;
       overflow-x: auto;
     }
-    /* HTML <style> - ESTILOS QUE USAN VARIABLES DE TEMA */
 
-    /* Estilo para el contenedor general del informe */
     .bot-report {
       font-family: 'Segoe UI', sans-serif; 
       line-height: 1.6;
-      color: var(--bot-msg-text); /* El texto del informe usa el color dinámico */
+      color: var(--bot-msg-text);
     }
 
-    /* Estilos de encabezados (generados por Markdown) */
     .bot-report h1,
     .bot-report h2,
     .bot-report h3,
     .bot-report h4,
     .bot-report p,
     .bot-report li {
-        color: var(--bot-msg-text); /* Asegura que todos los elementos hereden el color correcto */
+        color: var(--bot-msg-text);
     }
 
-    /* Estilo para el contenedor general de la tabla (el div 'aigr-card') */
     .aigr-card {
       background: var(--bot-msg-bg);
       border-radius: 10px;
       padding: 12px;
       box-shadow: 0 0 8px var(--card); 
       margin-top: 10px;
-      color: var(--bot-msg-text); /* Título de la tabla */
+      color: var(--bot-msg-text);
     }
 
-    /* Estilos de la tabla en sí (elemento <table>) */
     .aigr-table {
       border-collapse: collapse;
       width: 100%;
@@ -237,8 +384,8 @@
     }
 
     .aigr-table th {
-      background: var(--sidebar-bg); /* Fondo del encabezado */
-      color: var(--primary); /* Texto del encabezado en color principal */
+      background: var(--sidebar-bg);
+      color: var(--primary);
       padding: 10px;
       text-align: left;
       font-weight: 600;
@@ -249,22 +396,21 @@
       border-bottom: 1px solid var(--border);
       padding: 8px;
       font-size: 0.95rem;
-      color: var(--bot-msg-text); /* Texto de las celdas */
-      background-color: var(--messages-bg); /* Fondo de la celda */
+      color: var(--bot-msg-text);
+      background-color: var(--messages-bg);
     }
 
-    /* Filas pares con ligero contraste */
     .aigr-table tr:nth-child(even) td {
       background-color: var(--bot-msg-bg); 
     }
 
-    /* Estilo para el pie de nota de la tabla (reemplaza el style en línea) */
     .table-footer,
     .error-message { 
         font-size: 0.85rem;
-        color: var(--border); /* Un color sutil */
+        color: var(--border);
         margin-top: 8px;
     }
+
     .bot-msg table, 
     .bot-msg th, 
     .bot-msg td {
@@ -400,6 +546,89 @@
   </div>
 </div>
 
+<!-- Botón de Información -->
+<button id="info-btn" title="Tutorial">
+  <span class="material-icons">info</span>
+</button>
+
+<!-- Modal de Tutorial -->
+<div class="modal-overlay" id="tutorial-modal">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2>
+        <span class="material-icons">school</span>
+        Tutorial del Agente SGD
+      </h2>
+      <button class="modal-close" id="close-modal">
+        <span class="material-icons">close</span>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="tutorial-section">
+        <h3>
+          <span class="material-icons">chat</span>
+          1. Iniciar una Conversación
+        </h3>
+        <p>Escribe tu pregunta o consulta en el campo de texto y presiona Enter o el botón de enviar.</p>
+        <p>El agente puede ayudarte con análisis de datos, consultas SQL y mucho más.</p>
+      </div>
+
+      <div class="tutorial-section">
+        <h3>
+          <span class="material-icons">folder</span>
+          2. Subir Archivos
+        </h3>
+        <p>Haz clic en el botón de adjuntar (📎) para cargar archivos CSV, Excel o de texto.</p>
+        <p>Una vez cargado, puedes hacer preguntas sobre el contenido del archivo.</p>
+      </div>
+
+      <div class="tutorial-section">
+        <h3>
+          <span class="material-icons">mic</span>
+          3. Entrada por Voz
+        </h3>
+        <p>Presiona el botón del micrófono para grabar un mensaje de voz.</p>
+        <p>El sistema transcribirá automáticamente tu mensaje y lo procesará.</p>
+      </div>
+
+      <div class="tutorial-section">
+        <h3>
+          <span class="material-icons">history</span>
+          4. Gestión de Sesiones
+        </h3>
+        <p>Todas tus conversaciones se guardan en sesiones en la barra lateral.</p>
+        <p>Haz clic en una sesión para recuperar el historial completo.</p>
+        <p>Usa el botón "+ Nueva sesión" para comenzar una conversación nueva.</p>
+      </div>
+
+      <div class="tutorial-section">
+        <h3>
+          <span class="material-icons">palette</span>
+          5. Cambiar Tema
+        </h3>
+        <p>Alterna entre modo oscuro y claro usando el interruptor en la parte superior de la barra lateral.</p>
+        <div>
+          <span class="feature-badge">🌙 Modo Oscuro</span>
+          <span class="feature-badge">☀️ Modo Claro</span>
+        </div>
+      </div>
+
+      <div class="tutorial-section">
+        <h3>
+          <span class="material-icons">tips_and_updates</span>
+          Consejos
+        </h3>
+        <ul>
+          <li>Sé específico en tus consultas para obtener mejores resultados</li>
+          <li>Puedes pedir gráficos, tablas y análisis visuales</li>
+          <li>El agente mantiene el contexto de la conversación</li>
+          <li>Usa preguntas de seguimiento para profundizar en los análisis</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 let currentSessionId = null;
 let currentFile = null;
@@ -432,21 +661,121 @@ function updateThemeIcons(theme) {
     lightIcon.classList.add('active');
   }
 }
+// ============================================================
+// FUNCION AUXILIAR: CLASIFICACION DE FECHAS
+// ============================================================
+function getRelativeDateGroup(dateString) {
+    if (!dateString) return "Anteriores"; 
+
+    const now = new Date();
+    const sessionDate = new Date(dateString);
+
+    // Definimos los rangos de fecha (medianoche)
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const startOfYesterday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+    const startOf7DaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+    const startOf30DaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+
+    if (sessionDate >= startOfToday) {
+        return "Hoy";
+    }
+    if (sessionDate >= startOfYesterday) {
+        return "Ayer";
+    }
+    if (sessionDate >= startOf7DaysAgo) {
+        return "Últimos 7 días";
+    }
+    if (sessionDate >= startOf30DaysAgo) {
+        return "Últimos 30 días";
+    }
+    return "Anteriores";
+}
 
 // Cargar sesiones anteriores
+// ============================================================
+// FUNCION PRINCIPAL: CARGAR Y AGRUPAR SESIONES
+// ============================================================
 function loadSessions() {
     fetch("/sessions")
         .then(res => res.json())
         .then(data => {
             const sessionsDiv = document.getElementById("sessions");
-            sessionsDiv.innerHTML = '';
-            data.sessions.forEach(s => {
-                const div = document.createElement("div");
-                div.className = "session";
-                div.innerText = s.session_id + " (" + s.msg_count + " msgs)";
-                div.onclick = () => selectSession(s.session_id);
-                sessionsDiv.appendChild(div);
+            sessionsDiv.innerHTML = ''; // Limpiamos el contenedor
+
+            if (!data.sessions || data.sessions.length === 0) {
+                sessionsDiv.innerText = 'No hay sesiones anteriores.';
+                return;
+            }
+
+            // 1. Las sesiones ya vienen ordenadas por fecha desde el backend.
+            const sortedSessions = data.sessions; 
+
+            // 2. Agrupamos las sesiones usando la fecha
+            const groups = {
+                "Hoy": [],
+                "Ayer": [],
+                "Últimos 7 días": [],
+                "Últimos 30 días": [],
+                "Anteriores": []
+            };
+
+            sortedSessions.forEach(s => {
+                const groupName = getRelativeDateGroup(s.last_updated);
+                // Si el nombre del grupo existe, añadimos la sesión
+                if (groups[groupName]) {
+                     groups[groupName].push(s);
+                }
             });
+
+            // 3. Renderizamos los grupos y sus sesiones en el orden deseado
+            const groupOrder = ["Hoy", "Ayer", "Últimos 7 días", "Últimos 30 días", "Anteriores"];
+
+            groupOrder.forEach(groupName => {
+                const sessionsInGroup = groups[groupName];
+
+                if (sessionsInGroup.length > 0) {
+                    
+                    // Añadir el título del grupo (p.ej., "Hoy")
+                    const groupHeader = document.createElement('h4');
+                    groupHeader.innerText = groupName;
+                    sessionsDiv.appendChild(groupHeader);
+
+                    // Añadir las sesiones de ese grupo
+                    sessionsInGroup.forEach(s => {
+                        const div = document.createElement("div");
+                        div.className = "session";
+                        div.onclick = () => selectSession(s.session_id);
+
+                        // --- 1. Calcular el nombre visible ---
+                        // Coje las primeras 3 palabras del primer mensaje
+                        const rawName = s.name || "Nueva Sesión";
+                        const nameParts = rawName.split(/\s+/).filter(Boolean);
+                        const sessionName = nameParts.slice(0, 3).join(' ') + (nameParts.length > 3 ? '...' : '');
+
+                        // --- 2. Formato de la hora ---
+                        const sessionDate = new Date(s.last_updated);
+                        const timeFormat = sessionDate.toLocaleTimeString('es-ES', {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        });
+
+                        // --- 3. Construir la estructura HTML dentro del <div> ---
+                        // Usaremos un span para el nombre principal y un span/p para la info secundaria
+                        div.innerHTML = `
+                            <span class="session-name">${sessionName}</span>
+                            <span class="session-info">${timeFormat} (${s.msg_count} msgs)</span>
+                        `;
+                        
+                        sessionsDiv.appendChild(div);
+
+                    });
+                }
+            });
+        })
+        .catch(error => {
+            console.error('Error al cargar sesiones:', error);
+            const sessionsDiv = document.getElementById("sessions");
+            sessionsDiv.innerText = 'Error al cargar sesiones.';
         });
 }
 
@@ -521,31 +850,27 @@ function appendMessage(msg, cls) {
     const div = document.createElement("div");
     div.className = "message " + cls;
     
-    // 1. Inyectar el HTML que incluye el div del gráfico y el script
     div.innerHTML = msg;
 
     wrapper.appendChild(div);
     messagesDiv.appendChild(wrapper);
     messagesDiv.scrollTop = messagesDiv.scrollHeight;
     
-    // 2. 💡 CRÍTICO: Buscar y ejecutar los scripts inyectados (solo si es un mensaje de bot)
     if (cls === "bot-msg") {
         const scripts = div.querySelectorAll("script");
         scripts.forEach(script => {
             const newScript = document.createElement('script');
-            // Copiar atributos (como type) y contenido
             if (script.src) {
                 newScript.src = script.src;
             } else {
                 newScript.textContent = script.textContent;
             }
-            
-            // Eliminar el script antiguo y ejecutar el nuevo
             script.parentNode.removeChild(script); 
             div.appendChild(newScript);
         });
     }
 }
+
 // Botones
 document.getElementById("send-btn").onclick = sendMessage;
 document.getElementById("user-input").addEventListener("keydown", e => { if(e.key==="Enter") sendMessage(); });
@@ -634,6 +959,26 @@ document.getElementById("new-session-btn").onclick = () => {
 // Inicializar
 loadSessions();
 loadHistory();
+
+// Modal Tutorial
+const infoBtn = document.getElementById('info-btn');
+const tutorialModal = document.getElementById('tutorial-modal');
+const closeModal = document.getElementById('close-modal');
+
+infoBtn.addEventListener('click', () => {
+  tutorialModal.classList.add('active');
+});
+
+closeModal.addEventListener('click', () => {
+  tutorialModal.classList.remove('active');
+});
+
+// Cerrar modal al hacer clic fuera de él
+tutorialModal.addEventListener('click', (e) => {
+  if (e.target === tutorialModal) {
+    tutorialModal.classList.remove('active');
+  }
+});
 
 </script>
 

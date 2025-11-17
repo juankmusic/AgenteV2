@@ -14,7 +14,7 @@ from typing import Dict, Any, List
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 sys.path.append(BASE_DIR)
 
-from db.connection import connect_db  # ✅ Usamos tu conexión existente
+from db.connection import connect_db  # Usamos la conexión existente
 
 
 # ============================================================
@@ -30,7 +30,7 @@ def get_database_schema():
     cursor = conn.cursor(cursor_factory=RealDictCursor)
     schema = {}
 
-    # 1️⃣ Obtener todas las tablas del esquema público
+    # Obtener todas las tablas del esquema público
     cursor.execute("""
         SELECT table_name
         FROM information_schema.tables
@@ -41,7 +41,7 @@ def get_database_schema():
     tables = [r["table_name"] for r in cursor.fetchall()]
 
     for table in tables:
-        # 2️⃣ Columnas
+        # Columnas
         cursor.execute("""
             SELECT column_name, data_type
             FROM information_schema.columns
@@ -55,7 +55,7 @@ def get_database_schema():
             col_name = r["column_name"]
             data_type = r["data_type"]
             
-            # --- Enriquecimiento automático de columnas (NUEVO) ---
+            # --- Enriquecimiento automático de columnas ---
             keywords = [col_name]
             description = f"Columna de tipo {data_type}."
             
@@ -74,7 +74,7 @@ def get_database_schema():
                 "keywords": keywords
             }
         
-        # 3️⃣ Claves primarias (Guardadas para referencia, no semántica)
+        # Claves primarias (Guardadas para referencia, no semántica)
         cursor.execute("""
             SELECT kcu.column_name
             FROM information_schema.table_constraints tc
@@ -84,7 +84,7 @@ def get_database_schema():
         """, (table,))
         pk = [r["column_name"] for r in cursor.fetchall()]
 
-        # 4️⃣ Claves foráneas (Guardadas para referencia, no semántica)
+        # 4. Claves foráneas (Guardadas para referencia, no semántica)
         cursor.execute("""
             SELECT
                 kcu.column_name,
@@ -141,7 +141,7 @@ def enrich_semantic_info(schema: Dict[str, Any]) -> Dict[str, Any]:
             "description": "Respuestas seleccionadas o escritas por los usuarios.",
             "keywords": ["respuesta", "contestación", "opción", "resultado"]
         }
-        # Puedes añadir más tablas aquí si lo necesitas
+        # Se puede añadir más tablas aquí si se necesitan
     }
 
     for table, data in table_enrichment.items():
@@ -169,7 +169,7 @@ def main():
     print("✨ Enriqueciendo con información semántica...")
     enriched_schema = enrich_semantic_info(schema)
 
-    # 🛑 PASO CRÍTICO: Envolver el esquema enriquecido en la clave 'tables'
+    # PASO CRÍTICO: Envolver el esquema enriquecido en la clave 'tables'
     final_output = {
         "tables": enriched_schema
     }
@@ -184,7 +184,9 @@ def main():
 
     print(f"✅ Archivo generado correctamente en: {output_path}")
 
-
+# ============================================================
+# EJECUCIÓN DEL SCRIPT
+# ============================================================
 if __name__ == "__main__":
     try:
         main()
