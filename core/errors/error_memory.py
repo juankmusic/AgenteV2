@@ -5,41 +5,52 @@ from .error_types import ClassifiedError  # Importación relativa
 
 class ErrorMemory:
     """
-    Almacena un historial reciente de los últimos N errores clasificados.
+    Esta clase funciona como una pequeña "caja de recuerdos".
+    Aquí guardamos los últimos errores que han ocurrido.
+    La caja tiene un límite, así que si se llena, el error más viejo se borra solo.
     """
+
     def __init__(self, max_size: int = 20):
         """
-        Inicializa la memoria con un tamaño máximo.
-        :param max_size: El número de errores a recordar.
+        Crea la caja donde se guardarán los errores.
+        :param max_size: Cantidad máxima de errores que se van a recordar.
         """
-        # maxlen=max_size se encarga automáticamente de eliminar
-        # el elemento más antiguo cuando se agrega uno nuevo y la cola está llena.
+        # Usamos deque porque maneja automáticamente el tamaño máximo.
+        # Si se llena, borra el error más antiguo cuando se agrega uno nuevo.
         self.memory = deque(maxlen=max_size)
 
     def add(self, error_info: ClassifiedError):
         """
-        Agrega un nuevo error clasificado a la memoria.
+        Guarda un nuevo error dentro de la memoria.
         """
+        # Este print sirve para que el desarrollador vea qué error se agregó.
         print(f"[ErrorMemory] Agregando error: {error_info.type}")
+
+        # Añadimos el error a la cola.
         self.memory.append(error_info)
 
     def get_last(self, n: int = 5) -> List[ClassifiedError]:
         """
-        Recupera los últimos 'n' errores.
+        Devuelve una lista con los últimos 'n' errores.
         """
-        # Convierte el deque a lista y devuelve los últimos n elementos
+        # Convertimos la cola completa a lista
+        # y luego regresamos solo los últimos n elementos.
         return list(self.memory)[-n:]
 
     def get_all(self) -> List[ClassifiedError]:
         """
-        Recupera todos los errores actualmente en memoria.
+        Devuelve todos los errores guardados en la memoria.
         """
         return list(self.memory)
 
     def get_last_error_type(self) -> ErrorType | None:
         """
-        Devuelve el tipo del último error, si existe.
+        Devuelve el tipo del error más reciente.
+        Si no hay errores guardados aún, devuelve None.
         """
         if self.memory:
+            # El último error está al final de la cola
             return self.memory[-1].type
+
+        # Si no hay nada aún, devolvemos None
         return None
